@@ -453,7 +453,7 @@ jobs:
           echo "正在配置支持lxc-docker任务…"
           cd kernel_workspace
           # 克隆包含补丁的仓库到特定的临时文件夹
-          git clone --depth=1 https://github.com/wings110/oppo_oplus_realme_sm8650.git $GITHUB_ACTOR\_lxc
+          git clone --depth=1 https://github.com/wings110/8650-lxc-docker.git $GITHUB_ACTOR\_lxc
           
           # 我们身处 kernel_workspace 目录，补丁内的前缀是 a/common/...
           # 刚好利用 -p1 剥离 a/，让其正确应用在当前的 common 文件夹下
