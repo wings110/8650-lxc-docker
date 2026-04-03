@@ -1,0 +1,24 @@
+From 6094c16f81309d0ecb884f6935e553f5b064ca3c Mon Sep 17 00:00:00 2001
+From: wings110 <283982871@qq.com>
+Date: Sun, 2 Feb 2025 00:42:45 +0800
+Subject: [PATCH] cgroup: fix cgroup prefix
+
+---
+ common/kernel/cgroup/cgroup.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/common/kernel/cgroup/cgroup.c b/common/kernel/cgroup/cgroup.c
+index 9bf089ccd..5d62874f9 100644
+--- a/common/kernel/cgroup/cgroup.c
++++ b/common/kernel/cgroup/cgroup.c
+@@ -4234,6 +4234,10 @@ static int cgroup_add_file(struct cgroup_subsys_state *css, struct cgroup *cgrp,
+ 		cfile->kn = kn;
+ 		spin_unlock_irq(&cgroup_file_kn_lock);
+ 	}
++	if (cft->ss && (cgrp->root->flags & CGRP_ROOT_NOPREFIX) && !(cft->flags & CFTYPE_NO_PREFIX)) {
++				snprintf(name, CGROUP_FILE_NAME_MAX, "%s.%s", cft->ss->name, cft->name);
++				kernfs_create_link(cgrp->kn, name, kn);
++	}
+ 
+ 	return 0;
+ }

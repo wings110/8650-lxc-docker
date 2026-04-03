@@ -1,0 +1,22 @@
+From c6c59b2418da0ba35b005f111ee4b24c2b24f8b6 Mon Sep 17 00:00:00 2001
+From: wings110 <283982871@qq.com>
+Date: Sun, 2 Feb 2025 00:39:36 +0800
+Subject: [PATCH] kernel/module/version.c: Ignore symbols crc check
+
+---
+ common/kernel/module/version.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/common/kernel/module/version.c b/common/kernel/module/version.c
+index 53f43ac5a..56a6c6bf1 100644
+--- a/common/kernel/module/version.c
++++ b/common/kernel/module/version.c
+@@ -52,7 +52,7 @@ int check_version(const struct load_info *info,
+ 
+ bad_version:
+ 	pr_warn("%s: disagrees about version of symbol %s\n", info->name, symname);
+-	return 0;
++	return 1;
+ }
+ 
+ int check_modstruct_version(const struct load_info *info,
