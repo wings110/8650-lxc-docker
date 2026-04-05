@@ -34,7 +34,7 @@ diff --git a/common/arch/arm64/configs/gki_defconfig b/common/arch/arm64/configs
  CONFIG_KALLSYMS_ALL=y
  # CONFIG_RSEQ is not set
  CONFIG_EMBEDDED=y
-@@ -773,3 +784,24 @@
+@@ -773,3 +785,25 @@
  CONFIG_KUNIT_DEBUGFS=y
  # CONFIG_KUNIT_DEFAULT_ENABLED is not set
  # CONFIG_RUNTIME_TESTING_MENU is not set
@@ -59,3 +59,4 @@ diff --git a/common/arch/arm64/configs/gki_defconfig b/common/arch/arm64/configs
 +CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y
 +CONFIG_LOCALVERSION="-Wings110"
 +# CONFIG_LOCALVERSION_AUTO is not set
++CONFIG_SYSVIPC=y
