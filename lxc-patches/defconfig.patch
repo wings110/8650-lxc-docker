@@ -34,7 +34,16 @@ diff --git a/common/arch/arm64/configs/gki_defconfig b/common/arch/arm64/configs
  CONFIG_KALLSYMS_ALL=y
  # CONFIG_RSEQ is not set
  CONFIG_EMBEDDED=y
-@@ -773,3 +785,25 @@
+@@ -68,7 +79,7 @@
+ CONFIG_RANDOMIZE_BASE=y
+ # CONFIG_RANDOMIZE_MODULE_REGION_FULL is not set
+ CONFIG_UNWIND_PATCH_PAC_INTO_SCS=y
+-CONFIG_CMDLINE="console=ttynull stack_depot_disable=on cgroup_disable=pressure kasan.page_alloc.sample=10 kasan.stacktrace=off kvm-arm.mode=protected bootconfig ioremap_guard"
++CONFIG_CMDLINE="console=ttynull stack_depot_disable=on cgroup_disable=pressure kasan.page_alloc.sample=10 kasan.stacktrace=off kvm-arm.mode=protected bootconfig cgroup_no_v1=cpu,cpuset,io,memory ioremap_guard"
+ CONFIG_CMDLINE_EXTEND=y
+ # CONFIG_DMI is not set
+ CONFIG_HIBERNATION=y
+@@ -773,3 +784,31 @@
  CONFIG_KUNIT_DEBUGFS=y
  # CONFIG_KUNIT_DEFAULT_ENABLED is not set
  # CONFIG_RUNTIME_TESTING_MENU is not set
@@ -60,3 +69,9 @@ diff --git a/common/arch/arm64/configs/gki_defconfig b/common/arch/arm64/configs
 +CONFIG_LOCALVERSION="-Wings110"
 +# CONFIG_LOCALVERSION_AUTO is not set
 +CONFIG_SYSVIPC=y
++CONFIG_CGROUP_MISC=y
++CONFIG_CGROUP_PERF=y
++CONFIG_BTRFS_FS=y
++CONFIG_CEPH_FS=y
++CONFIG_IP_SCTP=y
++CONFIG_NF_CONNTRACK_ZONES=y
