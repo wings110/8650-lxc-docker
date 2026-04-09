@@ -16,14 +16,6 @@ diff --git a/common/include/net/net_namespace.h b/common/include/net/net_namespa
 -#endif
  #if IS_ENABLED(CONFIG_MPLS)
  	struct netns_mpls	mpls;
-@@ -195,3 +194,7 @@
- 	};
- } __randomize_layout;
- 
-+#if IS_ENABLED(CONFIG_IP_VS)
-+#define net_ipvs_ptr(_net)	((_net)->ext->ipvs)
-+#endif
-+
 diff --git a/common/include/net/ip_vs.h b/common/include/net/ip_vs.h
 --- a/common/include/net/ip_vs.h
 +++ b/common/include/net/ip_vs.h
@@ -32,7 +24,7 @@ diff --git a/common/include/net/ip_vs.h b/common/include/net/ip_vs.h
  static inline struct netns_ipvs *net_ipvs(struct net* net)
  {
 -	return net->ipvs;
-+	return net_ipvs_ptr(net);
++	return net->ext->ipvs;
  }
 diff --git a/common/net/netfilter/ipvs/ip_vs_core.c b/common/net/netfilter/ipvs/ip_vs_core.c
 --- a/common/net/netfilter/ipvs/ip_vs_core.c
@@ -42,19 +34,19 @@ diff --git a/common/net/netfilter/ipvs/ip_vs_core.c b/common/net/netfilter/ipvs/
  	ipvs->gen = atomic_read(&ipvs_netns_cnt);
  	atomic_inc(&ipvs_netns_cnt);
 -	net->ipvs = ipvs;
-+	net_ipvs_ptr(net) = ipvs;
++	net->ext->ipvs = ipvs;
  	if (ip_vs_estimator_net_init(ipvs) < 0)
 @@ -2335,5 +2335,5 @@
  control_fail:
  	ip_vs_estimator_net_cleanup(ipvs);
  estimator_fail:
 -	net->ipvs = NULL;
-+	net_ipvs_ptr(net) = NULL;
++	net->ext->ipvs = NULL;
  	return -ENOMEM;
 @@ -2353,5 +2353,5 @@
  		ip_vs_control_net_cleanup(ipvs);
  		ip_vs_estimator_net_cleanup(ipvs);
  		IP_VS_DBG(2, "ipvs netns %d released\n", ipvs->gen);
 -		net->ipvs = NULL;
-+		net_ipvs_ptr(net) = NULL;
++		net->ext->ipvs = NULL;
  	}
