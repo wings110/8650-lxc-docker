@@ -1,0 +1,24 @@
+From f95dd7af401d5257c0b816dd82c8778bce3d3521 Mon Sep 17 00:00:00 2001
+From: wings110 <283982871@qq.com>
+Date: Thu, 6 Feb 2025 01:05:57 +0800
+Subject: [PATCH] Update modules.bzl
+
+add ipvs modules
+---
+ common/modules.bzl | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/common/modules.bzl b/common/modules.bzl
+index 52d92225a..eb383268d 100644
+--- a/common/modules.bzl
++++ b/common/modules.bzl
+@@ -67,6 +67,9 @@ _COMMON_GKI_MODULES_LIST = [
+     "net/rfkill/rfkill.ko",
+     "net/tipc/diag.ko",
+     "net/tipc/tipc.ko",
++    "net/netfilter/ipvs/ip_vs_rr.ko",
++    "net/netfilter/xt_ipvs.ko",
++    "net/netfilter/ipvs/ip_vs.ko",
+ ]
+ 
+ # Deprecated - Use `get_gki_modules_list` function instead.
