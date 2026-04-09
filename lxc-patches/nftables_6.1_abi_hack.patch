@@ -1,0 +1,117 @@
+diff --git a/common/include/net/net_namespace.h b/common/include/net/net_namespace.h
+--- a/common/include/net/net_namespace.h
++++ b/common/include/net/net_namespace.h
+@@ -55,6 +55,13 @@
+ struct netns_ipvs;
+ struct bpf_prog;
+ 
++/* ABI Hack: 外挂结构体，用于存放 NFTables 以防止 struct net 膨胀 */
++struct net_ext {
++#if defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE)
++	struct netns_nftables	nft;
++#endif
++};
++
+ 
+ #define NETDEV_HASHBITS    8
+ #define NETDEV_HASHENTRIES (1 << NETDEV_HASHBITS)
+@@ -131,9 +138,6 @@
+ #if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
+ 	struct netns_ct		ct;
+ #endif
+-#if defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE)
+-	struct netns_nftables	nft;
+-#endif
+ #if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+ 	struct netns_ft ft;
+ #endif
+@@ -145,6 +149,10 @@
+ 	/* Used to store attached BPF programs */
+ 	struct netns_bpf	bpf;
+ 
++	/* ABI Hack: 精准插入 bpf 和 xfrm 之间的 24 字节空洞 */
++	/* 占用 8 字节，完美恢复 wext_nlevents, gen, bpf 的原始偏移量 */
++	struct net_ext		*ext;
++
+ 	/* Note : following structs are cache line aligned */
+ #ifdef CONFIG_XFRM
+ 	struct netns_xfrm	xfrm;
+@@ -453,4 +461,8 @@
+ static inline void net_ns_init(void) {}
+ #endif
+ 
++#if defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE)
++#define net_nft(_net)		((_net)->ext->nft)
++#endif
++
+ #endif /* __NET_NET_NAMESPACE_H */
+diff --git a/common/net/core/net_namespace.c b/common/net/core/net_namespace.c
+--- a/common/net/core/net_namespace.c
++++ b/common/net/core/net_namespace.c
+@@ -45,6 +45,13 @@
+ 	net = kmem_cache_zalloc(net_cachep, GFP_KERNEL);
+ 	if (!net)
+ 		goto out_free;
++
++#if defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE)
++	net->ext = kzalloc(sizeof(*net->ext), GFP_KERNEL);
++	if (!net->ext) {
++		kmem_cache_free(net_cachep, net);
++		goto out_free;
++	}
++#endif
+ 
+ #ifdef CONFIG_KEYS
+@@ -430,6 +437,9 @@
+ 	if (net->ucounts)
+ 		dec_ucount(net->ucounts, UCOUNT_NET_NAMESPACES);
+ 	kfree(net->key_domain);
++#if defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE)
++	kfree(net->ext);
++#endif
+ 	kmem_cache_free(net_cachep, net);
+ }
+diff --git a/common/include/net/netfilter/nf_tables.h b/common/include/net/netfilter/nf_tables.h
+--- a/common/include/net/netfilter/nf_tables.h
++++ b/common/include/net/netfilter/nf_tables.h
+@@ -1459,7 +1459,7 @@
+  */
+ static inline unsigned int nft_gencursor_next(const struct net *net)
+ {
+-	return net->nft.gencursor + 1 == 1 ? 1 : 0;
++	return net_nft(net).gencursor + 1 == 1 ? 1 : 0;
+ }
+ 
+ static inline u8 nft_genmask_next(const struct net *net)
+@@ -1470,7 +1470,7 @@
+ static inline u8 nft_genmask_cur(const struct net *net)
+ {
+ 	/* Use READ_ONCE() to prevent refetching the value for atomicity */
+-	return 1 << READ_ONCE(net->nft.gencursor);
++	return 1 << READ_ONCE(net_nft(net).gencursor);
+ }
+ 
+ #define NFT_GENMASK_ANY		((1 << 0) | (1 << 1))
+diff --git a/common/net/netfilter/nf_tables_api.c b/common/net/netfilter/nf_tables_api.c
+--- a/common/net/netfilter/nf_tables_api.c
++++ b/common/net/netfilter/nf_tables_api.c
+@@ -9731,7 +9731,7 @@
+ 	gc_seq = nft_gc_seq_begin(nft_net);
+ 
+ 	/* step 3. Start new generation, rules_gen_X now in use. */
+-	net->nft.gencursor = nft_gencursor_next(net);
++	net_nft(net).gencursor = nft_gencursor_next(net);
+ 
+ 	list_for_each_entry_safe(trans, next, &nft_net->commit_list, list) {
+ 		nf_tables_commit_audit_collect(&adl, trans->ctx.table,
+diff --git a/common/net/netfilter/nf_tables_core.c b/common/net/netfilter/nf_tables_core.c
+--- a/common/net/netfilter/nf_tables_core.c
++++ b/common/net/netfilter/nf_tables_core.c
+@@ -234,7 +234,7 @@
+ 	struct nft_regs regs = {};
+ 	unsigned int stackptr = 0;
+ 	struct nft_jumpstack jumpstack[NFT_JUMP_STACK_SIZE];
+-	bool genbit = READ_ONCE(net->nft.gencursor);
++	bool genbit = READ_ONCE(net_nft(net).gencursor);
+ 	struct nft_rule_blob *blob;
+ 	struct nft_traceinfo info;
