@@ -48,7 +48,7 @@ diff --git a/common/include/net/net_namespace.h b/common/include/net/net_namespa
 diff --git a/common/net/core/net_namespace.c b/common/net/core/net_namespace.c
 --- a/common/net/core/net_namespace.c
 +++ b/common/net/core/net_namespace.c
-@@ -45,6 +45,13 @@
+@@ -45,5 +45,13 @@
  	net = kmem_cache_zalloc(net_cachep, GFP_KERNEL);
  	if (!net)
  		goto out_free;
@@ -62,7 +62,7 @@ diff --git a/common/net/core/net_namespace.c b/common/net/core/net_namespace.c
 +#endif
  
  #ifdef CONFIG_KEYS
-@@ -430,6 +437,9 @@
+@@ -430,5 +438,8 @@
  	if (net->ucounts)
  		dec_ucount(net->ucounts, UCOUNT_NET_NAMESPACES);
  	kfree(net->key_domain);
