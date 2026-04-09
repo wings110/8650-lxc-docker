@@ -1,0 +1,46 @@
+--- a/common/include/net/net_namespace.h
++++ b/common/include/net/net_namespace.h
+@@ -55,6 +55,13 @@
+ struct netns_ipvs;
+ struct bpf_prog;
+ 
++/* ABI Hack: 外挂结构体，用于存放 NFTables 以防止 struct net 膨胀 */
++struct net_ext {
++#if defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE)
++	struct netns_nftables	nft;
++#endif
++};
++
+ 
+ #define NETDEV_HASHBITS    8
+ #define NETDEV_HASHENTRIES (1 << NETDEV_HASHBITS)
+@@ -131,9 +138,6 @@
+ #if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
+ 	struct netns_ct		ct;
+ #endif
+-#if defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE)
+-	struct netns_nftables	nft;
+-#endif
+ #if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+ 	struct netns_ft ft;
+ #endif
+@@ -145,6 +149,10 @@
+ 	/* Used to store attached BPF programs */
+ 	struct netns_bpf	bpf;
+ 
++	/* ABI Hack: 精准插入 bpf 和 xfrm 之间的 24 字节空洞 */
++	/* 占用 8 字节，完美恢复 wext_nlevents, gen, bpf 的原始偏移量 */
++	struct net_ext		*ext;
++
+ 	/* Note : following structs are cache line aligned */
+ #ifdef CONFIG_XFRM
+ 	struct netns_xfrm	xfrm;
+@@ -453,4 +461,8 @@
+ static inline void net_ns_init(void) {}
+ #endif
+ 
++#if defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE)
++#define net_nft(_net)		((_net)->ext->nft)
++#endif
++
+ #endif /* __NET_NET_NAMESPACE_H */
