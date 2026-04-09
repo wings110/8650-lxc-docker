@@ -1,6 +1,6 @@
-diff --git a/common/include/net/net_namespace.h b/common/include/net/net_namespace.h
---- a/common/include/net/net_namespace.h
-+++ b/common/include/net/net_namespace.h
+diff --git a/include/net/net_namespace.h b/include/net/net_namespace.h
+--- a/include/net/net_namespace.h
++++ b/include/net/net_namespace.h
 @@ -55,6 +55,13 @@
  struct netns_ipvs;
  struct bpf_prog;
@@ -45,9 +45,9 @@ diff --git a/common/include/net/net_namespace.h b/common/include/net/net_namespa
 +#endif
 +
  #endif /* __NET_NET_NAMESPACE_H */
-diff --git a/common/net/core/net_namespace.c b/common/net/core/net_namespace.c
---- a/common/net/core/net_namespace.c
-+++ b/common/net/core/net_namespace.c
+diff --git a/net/core/net_namespace.c b/net/core/net_namespace.c
+--- a/net/core/net_namespace.c
++++ b/net/core/net_namespace.c
 @@ -45,6 +45,13 @@
  	net = kmem_cache_zalloc(net_cachep, GFP_KERNEL);
  	if (!net)
@@ -71,9 +71,9 @@ diff --git a/common/net/core/net_namespace.c b/common/net/core/net_namespace.c
 +#endif
  	kmem_cache_free(net_cachep, net);
  }
-diff --git a/common/include/net/netfilter/nf_tables.h b/common/include/net/netfilter/nf_tables.h
---- a/common/include/net/netfilter/nf_tables.h
-+++ b/common/include/net/netfilter/nf_tables.h
+diff --git a/include/net/netfilter/nf_tables.h b/include/net/netfilter/nf_tables.h
+--- a/include/net/netfilter/nf_tables.h
++++ b/include/net/netfilter/nf_tables.h
 @@ -1459,7 +1459,7 @@
   */
  static inline unsigned int nft_gencursor_next(const struct net *net)
@@ -92,9 +92,9 @@ diff --git a/common/include/net/netfilter/nf_tables.h b/common/include/net/netfi
  }
  
  #define NFT_GENMASK_ANY		((1 << 0) | (1 << 1))
-diff --git a/common/net/netfilter/nf_tables_api.c b/common/net/netfilter/nf_tables_api.c
---- a/common/net/netfilter/nf_tables_api.c
-+++ b/common/net/netfilter/nf_tables_api.c
+diff --git a/net/netfilter/nf_tables_api.c b/net/netfilter/nf_tables_api.c
+--- a/net/netfilter/nf_tables_api.c
++++ b/net/netfilter/nf_tables_api.c
 @@ -9731,7 +9731,7 @@
  	gc_seq = nft_gc_seq_begin(nft_net);
  
@@ -104,9 +104,9 @@ diff --git a/common/net/netfilter/nf_tables_api.c b/common/net/netfilter/nf_tabl
  
  	list_for_each_entry_safe(trans, next, &nft_net->commit_list, list) {
  		nf_tables_commit_audit_collect(&adl, trans->ctx.table,
-diff --git a/common/net/netfilter/nf_tables_core.c b/common/net/netfilter/nf_tables_core.c
---- a/common/net/netfilter/nf_tables_core.c
-+++ b/common/net/netfilter/nf_tables_core.c
+diff --git a/net/netfilter/nf_tables_core.c b/net/netfilter/nf_tables_core.c
+--- a/net/netfilter/nf_tables_core.c
++++ b/net/netfilter/nf_tables_core.c
 @@ -234,7 +234,7 @@
  	struct nft_regs regs = {};
  	unsigned int stackptr = 0;
