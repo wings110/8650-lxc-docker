@@ -486,7 +486,7 @@ jobs:
             done
           fi
 
-      # ================== 核心升级：云端一键提取与找茬 ==================
+# ================== 核心升级：云端一键提取与找茬 ==================
       - name: 【云端 ABI 排雷】编译并提取结构体分析报告
         if: inputs.vmlinux_debug == true
         run: |
@@ -529,35 +529,36 @@ jobs:
           echo "========================================="
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error vmlinux
-          echo ">>> 提取对照组 struct net 结构..."
+          
+          echo ">>> 提取对照组 struct net 和 struct sk_buff 结构..."
           pahole -C net out/vmlinux > ../net_off.txt
+          pahole -C sk_buff out/vmlinux > ../skb_off.txt
           
           echo "========================================="
           echo ">>> 2. 编译实验组 (ON) 并生成报告 ..."
           echo "========================================="
-          echo "CONFIG_NF_TABLES=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NF_TABLES_INET=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NF_TABLES_IPV4=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NF_TABLES_IPV6=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NFT_CT=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NFT_NAT=y" >> arch/arm64/configs/gki_defconfig
-          echo "# CONFIG_BRIDGE_NETFILTER is not set" >> arch/arm64/configs/gki_defconfig
-          echo "# CONFIG_NF_CONNTRACK_ZONES is not set" >> arch/arm64/configs/gki_defconfig
+          # 【修改点】：删除 NFTABLES，注入开启 IP_VS 的相关配置
+          echo "CONFIG_IP_VS=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_IP_VS_PROTO_TCP=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_IP_VS_PROTO_UDP=y" >> arch/arm64/configs/gki_defconfig
           
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error vmlinux
-          echo ">>> 提取实验组 struct net 结构..."
+          
+          echo ">>> 提取实验组 struct net 和 struct sk_buff 结构..."
           pahole -C net out/vmlinux > ../net_on.txt
+          pahole -C sk_buff out/vmlinux > ../skb_on.txt
           
           echo "========================================="
           echo ">>> 3. 在云端进行 diff 差异比对 ..."
           echo "========================================="
           cd ..
-          # diff 发现不同会抛出退出码 1，必须加 || true 防止流水线中断崩溃
-          diff -u net_off.txt net_on.txt > abi_diff_report.txt || true
+          # 分别对 net 和 skb 进行比对，不让流水线中断
+          diff -u net_off.txt net_on.txt > abi_diff_net_report.txt || true
+          diff -u skb_off.txt skb_on.txt > abi_diff_skb_report.txt || true
           
           echo ">>> 正在打包所有文本报告..."
-          zip abi_analysis_reports.zip net_off.txt net_on.txt abi_diff_report.txt
+          zip abi_analysis_reports.zip net_off.txt net_on.txt skb_off.txt skb_on.txt abi_diff_net_report.txt abi_diff_skb_report.txt
           echo "✅ 云端排雷分析完成！准备上传压缩包。"
 
       - name: 上传 ABI 分析报告 (排雷专用)
