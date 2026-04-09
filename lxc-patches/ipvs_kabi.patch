@@ -1,41 +1,4 @@
---- a/common/include/linux/skbuff.h
-+++ b/common/include/linux/skbuff.h
-@@ -991,10 +991,6 @@
- #ifdef CONFIG_IPV6_NDISC_NODETYPE
- 	__u8			ndisc_nodetype:2;
- #endif
--
--#if IS_ENABLED(CONFIG_IP_VS)
--	__u8			ipvs_property:1;
--#endif
- #if IS_ENABLED(CONFIG_NETFILTER_XT_TARGET_TRACE) || IS_ENABLED(CONFIG_NF_TABLES)
- 	__u8			nf_trace:1;
- #endif
-@@ -1072,9 +1065,22 @@
- #ifdef CONFIG_KCOV
- 	u64			kcov_handle;
- #endif
--
-+union {
-+	struct
-+	{
- 	ANDROID_KABI_RESERVE(1);
- 	ANDROID_KABI_RESERVE(2);
-+	};
-+		struct
-+	{
-+#if IS_ENABLED(CONFIG_IP_VS)
-+	__u8			ipvs_property:1;
-+#endif
-+#if IS_ENABLED(CONFIG_IP_SCTP)
-+	__u8			csum_not_inet:1;
-+#endif
-+	};
-+};
- 
- 	); /* end headers group */
- 
-
+diff --git a/common/include/net/net_namespace.h b/common/include/net/net_namespace.h
 --- a/common/include/net/net_namespace.h
 +++ b/common/include/net/net_namespace.h
 @@ -57,7 +57,18 @@
@@ -58,7 +21,7 @@
  struct net {
  	/* First cache line can be often dirtied.
  	 * Do not place here read-mostly fields.
-@@ -166,10 +171,6 @@
+@@ -166,10 +177,6 @@
  #endif
  
  	u64			net_cookie; /* written once */
@@ -69,7 +32,7 @@
  #if IS_ENABLED(CONFIG_MPLS)
  	struct netns_mpls	mpls;
  #endif
-@@ -189,8 +190,31 @@
+@@ -189,8 +196,31 @@
  #if IS_ENABLED(CONFIG_SMC)
  	struct netns_smc	smc;
  #endif
@@ -101,7 +64,7 @@
  #include <linux/seq_file_net.h>
  
  /* Init's network namespace */
-
+diff --git a/common/include/net/ip_vs.h b/common/include/net/ip_vs.h
 --- a/common/include/net/ip_vs.h
 +++ b/common/include/net/ip_vs.h
 @@ -37,7 +37,7 @@
@@ -113,7 +76,7 @@
  }
  
  /* Connections' size value needed by ip_vs_ctl.c */
-
+diff --git a/common/net/netfilter/ipvs/ip_vs_core.c b/common/net/netfilter/ipvs/ip_vs_core.c
 --- a/common/net/netfilter/ipvs/ip_vs_core.c
 +++ b/common/net/netfilter/ipvs/ip_vs_core.c
 @@ -2300,7 +2300,7 @@
@@ -124,6 +87,7 @@
 +	net_ipvs_ptr(net) = ipvs;
  	if (ip_vs_estimator_net_init(ipvs) < 0)
  		goto estimator_fail;
+ 
 @@ -2336,7 +2336,7 @@
  control_fail:
  	ip_vs_estimator_net_cleanup(ipvs);
