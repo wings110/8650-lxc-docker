@@ -1,5 +1,5 @@
---- a/include/linux/skbuff.h
-+++ b/include/linux/skbuff.h
+--- a/common/include/linux/skbuff.h
++++ b/common/include/linux/skbuff.h
 @@ -991,10 +991,6 @@
  #ifdef CONFIG_IPV6_NDISC_NODETYPE
  	__u8			ndisc_nodetype:2;
@@ -36,8 +36,8 @@
  	); /* end headers group */
  
 
---- a/include/net/net_namespace.h
-+++ b/include/net/net_namespace.h
+--- a/common/include/net/net_namespace.h
++++ b/common/include/net/net_namespace.h
 @@ -57,7 +57,18 @@
  
  #define NETDEV_HASHBITS    8
@@ -102,8 +102,8 @@
  
  /* Init's network namespace */
 
---- a/include/net/ip_vs.h
-+++ b/include/net/ip_vs.h
+--- a/common/include/net/ip_vs.h
++++ b/common/include/net/ip_vs.h
 @@ -37,7 +37,7 @@
  /* Generic access of ipvs struct */
  static inline struct netns_ipvs *net_ipvs(struct net* net)
@@ -114,8 +114,8 @@
  
  /* Connections' size value needed by ip_vs_ctl.c */
 
---- a/net/netfilter/ipvs/ip_vs_core.c
-+++ b/net/netfilter/ipvs/ip_vs_core.c
+--- a/common/net/netfilter/ipvs/ip_vs_core.c
++++ b/common/net/netfilter/ipvs/ip_vs_core.c
 @@ -2300,7 +2300,7 @@
  	/* Counters used for creating unique names */
  	ipvs->gen = atomic_read(&ipvs_netns_cnt);
