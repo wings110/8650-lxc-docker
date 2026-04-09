@@ -465,7 +465,8 @@ jobs:
           for patch_file in ./$GITHUB_ACTOR\_lxc/lxc-patches/*.patch; do
             if [ -f "$patch_file" ]; then
               echo "正在应用补丁: $patch_file"
-              patch -p1 -F 3 < "$patch_file" || true
+              # 【关键修改】：删掉末尾的 || true ！！！
+              patch -p1 -F 3 < "$patch_file"
             fi
           done
 
