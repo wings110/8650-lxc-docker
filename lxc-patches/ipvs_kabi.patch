@@ -1,27 +1,14 @@
 diff --git a/common/include/net/net_namespace.h b/common/include/net/net_namespace.h
 --- a/common/include/net/net_namespace.h
 +++ b/common/include/net/net_namespace.h
-@@ -57,7 +57,18 @@
+@@ -58,6 +58,9 @@
  
- #define NETDEV_HASHBITS    8
- #define NETDEV_HASHENTRIES (1 << NETDEV_HASHBITS)
--
-+struct net_ext {
-+	struct net		*net;
+ struct net_ext {
+ 	struct net		*net;
 +#if IS_ENABLED(CONFIG_IP_VS)
 +	struct netns_ipvs	*ipvs;
 +#endif
-+#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
-+	struct netns_sctp	sctp;
-+#endif
-+#if defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE)
-+	struct netns_nftables	nft;
-+#endif
-+};
- struct net {
- 	/* First cache line can be often dirtied.
- 	 * Do not place here read-mostly fields.
-@@ -166,10 +177,6 @@
+@@ -166,10 +169,6 @@
  #endif
  
  	u64			net_cookie; /* written once */
@@ -31,39 +18,15 @@ diff --git a/common/include/net/net_namespace.h b/common/include/net/net_namespa
 -#endif
  #if IS_ENABLED(CONFIG_MPLS)
  	struct netns_mpls	mpls;
- #endif
-@@ -189,8 +196,31 @@
- #if IS_ENABLED(CONFIG_SMC)
- 	struct netns_smc	smc;
- #endif
-+	/* Keep legacy tail padding footprint; overlay nft state when enabled. */
-+	union {
-+		struct {
-+			/* Force padding: keep 16-byte tail reservation for ABI stability. */
-+			u64	__net_tail_pad1;
-+			u64	__net_tail_pad2;
-+		};
-+		struct {
-+			struct net_ext *ext;
-+		};
-+	};
+@@ -196,6 +195,10 @@
+ 	};
  } __randomize_layout;
  
 +#if IS_ENABLED(CONFIG_IP_VS)
 +#define net_ipvs_ptr(_net)	((_net)->ext->ipvs)
 +#endif
 +
-+#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
-+#define net_sctp(_net)		((_net)->ext->sctp)
-+#endif
-+
-+#if defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE)
-+#define net_nft(_net)		((_net)->ext->nft)
-+#endif
-+
  #include <linux/seq_file_net.h>
- 
- /* Init's network namespace */
 diff --git a/common/include/net/ip_vs.h b/common/include/net/ip_vs.h
 --- a/common/include/net/ip_vs.h
 +++ b/common/include/net/ip_vs.h
