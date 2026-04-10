@@ -488,67 +488,21 @@ jobs:
           # 克隆包含补丁的仓库到特定的临时文件夹
           git clone --depth=1 https://github.com/wings110/8650-lxc-docker.git $GITHUB_ACTOR\_lxc
           
-          # 我们身处 kernel_workspace 目录，补丁内的前缀是 a/common/...
-          # 刚好利用 -p1 剥离 a/，让其正确应用在当前的 common 文件夹下
+          # 1. 应用所有 .patch 补丁 (注意：补丁路径带 common/，在 kernel_workspace 目录下打补丁)
           for patch_file in ./$GITHUB_ACTOR\_lxc/lxc-patches/*.patch; do
             if [ -f "$patch_file" ]; then
-              # 核心拦截逻辑：跳过有冲突的静态补丁
-              if [[ "$patch_file" == *"sctp_abi_fix"* ]]; then
-                echo "⏭️ 跳过损坏的静态 SCTP 补丁..."
-                continue
-              fi
               echo "正在应用补丁: $patch_file"
               patch -p1 -F 3 < "$patch_file" || true
             fi
           done
-
-      - name: 【核心手术】无痕植入 SCTP ABI 修复代码 (Python 动态探针版)
-        run: |
-          echo ">>> 正在使用 Python 探针精准修复 SCTP ABI..."
-          cd kernel_workspace/common
           
-          cat << 'EOF' > fix_sctp.py
-          import re
-          
-          # ==== 1. 处理 net_namespace.h ====
-          with open('include/net/net_namespace.h', 'r') as f:
-              h = f.read()
-          
-          # 步骤 A: 移除原本位于 struct net 中间的 sctp
-          h = re.sub(r'#if defined\(CONFIG_IP_SCTP\)[^#]*?struct netns_sctp\s+sctp;\s*#endif', '', h, flags=re.DOTALL)
-          
-          # 步骤 B: 寻找 nftables 创建的外挂背包 (net_ext)，将 sctp 也塞进去
-          def insert_ext(m):
-              inner = m.group(2)
-              if 'netns_sctp' not in inner:
-                  inner += "\n#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)\n\tstruct netns_sctp\tsctp;\n#endif\n"
-              return m.group(1) + inner + m.group(3)
-              
-          h = re.sub(r'(struct net_ext\s*\{)(.*?)(\};)', insert_ext, h, flags=re.DOTALL)
-          
-          # 步骤 C: 添加宏重定向 (跟 nft 宏放在一起)
-          if 'net_sctp(_net)' not in h:
-              h = h.replace('#endif /* __NET_NET_NAMESPACE_H */',
-                  '#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)\n#define net_sctp(_net)\t\t((_net)->ext->sctp)\n#endif\n\n#endif /* __NET_NET_NAMESPACE_H */')
-                  
-          with open('include/net/net_namespace.h', 'w') as f:
-              f.write(h)
-              
-          # ==== 2. 处理 net_namespace.c ====
-          with open('net/core/net_namespace.c', 'r') as f:
-              c = f.read()
-              
-          # 让外挂背包在开启 SCTP 时也能被分配内存
-          c = c.replace('#if defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE)',
-                        '#if defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE) || defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)')
-                        
-          with open('net/core/net_namespace.c', 'w') as f:
-              f.write(c)
-              
-          print("✅ Python 探针手术完美完成！SCTP 已与 nftables 共享外挂背包！")
-          EOF
-          
-          python3 fix_sctp.py
+          # 2. 执行 SCTP 源碼修复脚本 (注意：脚本里面的相对路径基于 common，需要进入 common 执行)
+          cd common
+          if [ -f "../$GITHUB_ACTOR\_lxc/lxc-patches/sctp_source_fix.sh" ]; then
+            echo ">>> 执行 SCTP 源码修复脚本..."
+            # 使用 bash 直接运行，无需修改权限
+            bash "../$GITHUB_ACTOR\_lxc/lxc-patches/sctp_source_fix.sh"
+          fi
 
       - name: 添加制作名称
         run: |
