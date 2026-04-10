@@ -1,0 +1,77 @@
+diff --git a/common/include/net/net_namespace.h b/common/include/net/net_namespace.h
+--- a/common/include/net/net_namespace.h
++++ b/common/include/net/net_namespace.h
+@@ -137,9 +137,6 @@ struct net {
+ #if IS_ENABLED(CONFIG_IEEE802154_6LOWPAN)
+ 	struct netns_ieee802154_lowpan	ieee802154_lowpan;
+ #endif
+-#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
+-	struct netns_sctp	sctp;
+-#endif
+ #ifdef CONFIG_NETFILTER
+ 	struct netns_nf		nf;
+ #if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
+@@ -189,8 +186,22 @@ struct net {
+ #if IS_ENABLED(CONFIG_SMC)
+ 	struct netns_smc	smc;
+ #endif
+-	ANDROID_KABI_RESERVE(1);
++	/* ABI Hack: 利用末尾預留空間存放 SCTP 指針，防止中間成員位移 */
++	union {
++		struct {
++			ANDROID_KABI_RESERVE(1);
++		};
++		struct {
++#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
++			struct netns_sctp *sctp_ptr;
++#endif
++		};
++	};
+ } __randomize_layout;
+ 
++#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
++/* 將所有對 net->sctp 的直接訪問重定向到動態分配的 sctp_ptr */
++#define net_sctp(_net) (*((_net)->sctp_ptr))
++#endif
++
+ #include <linux/seq_file_net.h>
+ 
+diff --git a/common/net/core/net_namespace.c b/common/net/core/net_namespace.c
+--- a/common/net/core/net_namespace.c
++++ b/common/net/core/net_namespace.c
+@@ -421,6 +421,14 @@ static struct net *net_alloc(void)
+ 	net = kmem_cache_zalloc(net_cachep, GFP_KERNEL);
+ 	if (!net)
+ 		goto out_free;
++
++#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
++	/* 為 SCTP 結構體申請獨立內存 */
++	net->sctp_ptr = kzalloc(sizeof(struct netns_sctp), GFP_KERNEL);
++	if (!net->sctp_ptr) {
++		goto out_free_net;
++	}
++#endif
+ 
+ #ifdef CONFIG_KEYS
+ 	net->key_domain = kzalloc(sizeof(struct key_tag), GFP_KERNEL);
+@@ -434,6 +442,11 @@ static struct net *net_alloc(void)
+ 	return net;
+ 
+ #ifdef CONFIG_KEYS
++out_free_ext:
++#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
++	kfree(net->sctp_ptr);
++out_free_net:
++#endif
+ out_free_2:
+ 	kmem_cache_free(net_cachep, net);
+ 	net = NULL;
+@@ -462,6 +475,9 @@ void net_drop_ns(void *p)
+ {
+ 	if (refcount_dec_and_test(&net->passive)) {
+ 		kfree(rcu_access_pointer(net->gen));
++#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
++		kfree(net->sctp_ptr);
++#endif
+ 		/* There should not be any trackers left there. */
+ 		ref_tracker_dir_exit(&net->notrefcnt_tracker);
