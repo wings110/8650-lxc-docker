@@ -507,87 +507,10 @@ jobs:
           echo ">>> 正在云端动态生成 SCTP ABI 安全补丁..."
           cd kernel_workspace/common
           
-          cat << 'EOF' > sctp_abi_safe.patch
-    --- a/include/net/net_namespace.h
-    +++ b/include/net/net_namespace.h
-    @@ -137,9 +137,6 @@
-     #if IS_ENABLED(CONFIG_IEEE802154_6LOWPAN)
-      	struct netns_ieee802154_lowpan	ieee802154_lowpan;
-     #endif
-    -#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
-    -	struct netns_sctp	sctp;
-    -#endif
-     #ifdef CONFIG_NETFILTER
-      	struct netns_nf		nf;
-     #if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
-    @@ -189,8 +186,22 @@
-     #if IS_ENABLED(CONFIG_SMC)
-      	struct netns_smc	smc;
-     #endif
-    -	ANDROID_KABI_RESERVE(1);
-    +	/* ABI Hack: 利用末尾預留空間存放 SCTP 指針 */
-    +	union {
-    +		struct {
-    +			ANDROID_KABI_RESERVE(1);
-    +		};
-    +		struct {
-    +#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
-    +			struct netns_sctp *sctp_ptr;
-    +#endif
-    +		};
-    +	};
-     } __randomize_layout;
-      
-    +#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
-    +#define net_sctp(_net) (*((_net)->sctp_ptr))
-    +#endif
-    +
-     #include <linux/seq_file_net.h>
-     
-    --- a/net/core/net_namespace.c
-    +++ b/net/core/net_namespace.c
-    @@ -421,6 +421,13 @@
-      	net = kmem_cache_zalloc(net_cachep, GFP_KERNEL);
-      	if (!net)
-      		goto out_free;
-    +
-    +#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
-    +	net->sctp_ptr = kzalloc(sizeof(struct netns_sctp), GFP_KERNEL);
-    +	if (!net->sctp_ptr) {
-    +		goto out_free_net;
-    +	}
-    +#endif
-      
-     #ifdef CONFIG_KEYS
-      	net->key_domain = kzalloc(sizeof(struct key_tag), GFP_KERNEL);
-    @@ -434,6 +441,11 @@
-      	return net;
-      
-     #ifdef CONFIG_KEYS
-    +out_free_ext:
-    +#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
-    +	kfree(net->sctp_ptr);
-    +out_free_net:
-    +#endif
-     out_free_2:
-      	kmem_cache_free(net_cachep, net);
-      	net = NULL;
-    @@ -462,6 +474,9 @@
-      {
-      	if (refcount_dec_and_test(&net->passive)) {
-      		kfree(rcu_access_pointer(net->gen));
-    +#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
-    +		kfree(net->sctp_ptr);
-    +#endif
-      		/* There should not be any trackers left there. */
-      		ref_tracker_dir_exit(&net->notrefcnt_tracker);
-    EOF
-          
-          # 使用 sed 恢复因为 EOF 多行文本可能丢失的空行空格 (防止 patch 报错)
-          sed -i 's/^$/ /' sctp_abi_safe.patch
+          # 使用 Base64 写入，彻底免疫 YAML 解析器对 --- 符号的误判
+          echo "LS0tIGEvaW5jbHVkZS9uZXQvbmV0X25hbWVzcGFjZS5oCisrKyBiL2luY2x1ZGUvbmV0L25ldF9uYW1lc3BhY2UuaApAQCAtMTM3LDkgKzEzNyw2IEBACiAjaWYgSVNfRU5BQkxFRChDT05GSUdfSUVFRTgwMjE1NF82TE9XUEFOKQogIAlzdHJ1Y3QgbmV0bnNfaWVlZTgwMjE1NF9sb3dwYW4JaWVlZTgwMjE1NF9sb3dwYW47CiAjZW5kaWYKLSNpZiBkZWZpbmVkKENPTkZJR19JUF9TQ1RQKSB8fCBkZWZpbmVkKENPTkZJR19JUF9TQ1RQX01PRFVMRSkKLQlzdHJ1Y3QgbmV0bnNfc2N0cAlzY3RwOwotI2VuZGlmCiAjaWZkZWYgQ09ORklHX05FVEZJTFRFUgogIAlzdHJ1Y3QgbmV0bnNfbmYJCW5mOwogI2lmIGRlZmluZWQoQ09ORklHX05GX0NPTk5UUkFDSykgfHwgZGVmaW5lZChDT05GSUdfTkZfQ09OTlRSQUNLX01PRFVMRSkKQEAgLTE4OSw4ICsxODYsMjIgQEAKICNpZiBJU19FTkFCTEVEKENPTkZJR19TTUMpCiAgCXN0cnVjdCBuZXRuc19zbWMJc21jOwogI2VuZGlmCi0JQU5EUk9JRF9LQUJJX1JFU0VSVkUoMSk7CisJLyogQUJJIEhhY2s6IOWIqeeUqOacqOWwvumgkOeVmeiOpumWkOWtmOaUviBTQ1RQIOaMh+mHnCAqLworCXVuaW9uIHsKKwkJc3RydWN0IHsKKwkJCUFORFJPSURfS0FCSV9SRVNFUlZFKDEpOworCQl9OworCQlzdHJ1Y3QgeworI2lmIGRlZmluZWQoQ09ORklHX0lQX1NDVFApIHx8IGRlZmluZWQoQ09ORklHX0lQX1NDVFBfTU9EVUxFKQorCQkJc3RydWN0IG5ldG5zX3NjdHAgKnNjdHBfcHRyOworI2VuZGlmCisJCX07CisJfTsKIH0gX19yYW5kb21pemVfbGF5b3V0OwogIAorI2lmIGRlZmluZWQoQ09ORklHX0lQX1NDVFApIHx8IGRlZmluZWQoQ09ORklHX0lQX1NDVFBfTU9EVUxFKQorI2RlZmluZSBuZXRfc2N0cChfbmV0KSAoKihfbmV0KS0+c2N0cF9wdHIpCisjZW5kaWYKKwogI2luY2x1ZGUgPGxpbnV4L3NlcV9maWxlX25ldC5oPgogIAotLS0gYS9uZXQvY29yZS9uZXRfbmFtZXNwYWNlLmMKKysrIGIvbmV0L2NvcmUvbmV0X25hbWVzcGFjZS5jCkBAIC00MjEsNiArNDIxLDEzIEBACiAgCW5ldCA9IGttZW1fY2FjaGVfemFsbG9jKG5ldF9jYWNoZXAsIEdGUF9LRVJORUwpOwogIAlpZiAoIW5ldCkKICAJCWdvdG8gb3V0X2ZyZWU7CisKKyNpZiBkZWZpbmVkKENPTkZJR19JUF9TQ1RQKSB8fCBkZWZpbmVkKENPTkZJR19JUF9TQ1RQX01PRFVMRSkKKwluZXQtPnNjdHBfcHRyID0ga3phbGxvYyhzaXplb2Yoc3RydWN0IG5ldG5zX3NjdHApLCBHRlBfS0VSTkVMKTsKKwlpZiAoIW5ldC0+c2N0cF9wdHIpIHsKKwkJZ290byBvdXRfZnJlZV9uZXQ7CisJfQorI2VuZGlmCiAgCiAjaWZkZWYgQ09ORklHX0tFWVMKICAJbmV0LT5rZXlfZG9tYWluID0ga3phbGxvYyhzaXplb2Yoc3RydWN0IGtleV90YWcpLCBHRlBfS0VSTkVMKTsKQEAgLTQzNCw2ICs0NDEsMTEgQEAKICAJcmV0dXJuIG5ldDsKICAKICNpZmRlZiBDT05GSUdfS0VZUworb3V0X2ZyZWVfZXh0OgorI2lmIGRlZmluZWQoQ09ORklHX0lQX1NDVFApIHx8IGRlZmluZWQoQ09ORklHX0lQX1NDVFBfTU9EVUxFKQorCWtmcmVlKG5ldC0+c2N0cF9wdHIpOworb3V0X2ZyZWVfbmV0OgorI2VuZGlmCiBvdXRfZnJlZV8yOgogIAlrbWVtX2NhY2hlX2ZyZWUobmV0X2NhY2hlcCwgbmV0KTsKICAJbmV0ID0gTlVMTDsKQEAgLTQ2Miw2ICs0NzQsOSBAQAogIHsKICAJaWYgKHJlZmNvdW50X2RlY19hbmRfdGVzdCgmbmV0LT5wYXNzaXZlKSkgewogIAkJa2ZyZWUocmN1X2FjY2Vzc19wb2ludGVyKG5ldC0+Z2VuKSk7CisjaWYgZGVmaW5lZChDT05GSUdfSVBfU0NUUCkgfHwgZGVmaW5lZChDT05GSUdfSVBfU0NUUF9NT0RVTEUpCisJCWtmcmVlKG5ldC0+c2N0cF9wdHIpOworI2VuZGlmCiAgCQkvKiBUaGVyZSBzaG91bGQgbm90IGJlIGFueSB0cmFja2VycyBsZWZ0IHRoZXJlLiAqLwogIAkJcmVmX3RyYWNrZXJfZGlyX2V4aXQoJm5ldC0+bm90cmVmY250X3RyYWNrZXIpOw==" | base64 -d > sctp_abi_safe.patch
           
           echo ">>> 正在应用动态 SCTP ABI 补丁..."
-          # 使用 -l (--ignore-whitespace) 强制忽略任何看不见的换行符或空格错误
           patch -l -p1 -F 3 < sctp_abi_safe.patch
 
       - name: 添加制作名称
