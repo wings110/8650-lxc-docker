@@ -1,7 +1,7 @@
 diff --git a/common/include/net/net_namespace.h b/common/include/net/net_namespace.h
 --- a/common/include/net/net_namespace.h
 +++ b/common/include/net/net_namespace.h
-@@ -134,9 +134,6 @@ struct net {
+@@ -134,7 +134,4 @@ struct net {
  #if IS_ENABLED(CONFIG_IEEE802154_6LOWPAN)
   	struct netns_ieee802154_lowpan	ieee802154_lowpan;
  #endif
@@ -9,11 +9,7 @@ diff --git a/common/include/net/net_namespace.h b/common/include/net/net_namespa
 -	struct netns_sctp	sctp;
 -#endif
  #ifdef CONFIG_NETFILTER
-  	struct netns_nf		nf;
- #if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
-@@ -188,6 +185,15 @@ struct net {
- 	struct sock		*diag_nlsk;
-  
+@@ -188,3 +185,11 @@ struct net {
  	/* Force padding: */
 -	struct sock		*:64;
 +	/* ABI Hack: 存放独立的 SCTP 结构体防止位移 */
@@ -26,11 +22,9 @@ diff --git a/common/include/net/net_namespace.h b/common/include/net/net_namespa
 +		};
 +	};
  	struct sock		*:64;
- 	struct sock		*:64;
- 	struct sock		*:64;
-@@ -450,4 +456,12 @@ static inline void net_ns_init(void) {}
+@@ -451,3 +456,10 @@ static inline void net_ns_init(void) {}
+ #define net_nft(_net)		((_net)->ext->nft)
  #endif
-  
 +#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
 +struct sctp_ext {
 +	struct net *net;
@@ -38,16 +32,13 @@ diff --git a/common/include/net/net_namespace.h b/common/include/net/net_namespa
 +};
 +#define net_sctp(_net) ((_net)->sctp_ptr->sctp)
 +#endif
-+
  #endif /* __NET_NET_NAMESPACE_H */
 diff --git a/common/net/core/net_namespace.c b/common/net/core/net_namespace.c
 --- a/common/net/core/net_namespace.c
 +++ b/common/net/core/net_namespace.c
-@@ -421,6 +421,15 @@ static struct net *net_alloc(void)
- 	net = kmem_cache_zalloc(net_cachep, GFP_KERNEL);
+@@ -419,2 +419,10 @@ static struct net *net_alloc(void)
  	if (!net)
  		goto out_free;
-+
 +#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
 +	/* 为 SCTP 结构体申请独立内存 */
 +	net->sctp_ptr = kzalloc(sizeof(struct sctp_ext), GFP_KERNEL);
@@ -56,12 +47,7 @@ diff --git a/common/net/core/net_namespace.c b/common/net/core/net_namespace.c
 +	}
 +	net->sctp_ptr->net = net;
 +#endif
-  
- #ifdef CONFIG_KEYS
- 	net->key_domain = kzalloc(sizeof(struct key_tag), GFP_KERNEL);
-@@ -434,6 +443,11 @@ static struct net *net_alloc(void)
- 	return net;
-  
+@@ -443,3 +451,8 @@ static struct net *net_alloc(void)
  #ifdef CONFIG_KEYS
 +out_free_ext:
 +#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
@@ -70,13 +56,10 @@ diff --git a/common/net/core/net_namespace.c b/common/net/core/net_namespace.c
 +#endif
  out_free_2:
  	kmem_cache_free(net_cachep, net);
- 	net = NULL;
-@@ -462,6 +476,9 @@ void net_drop_ns(void *p)
- {
- 	if (refcount_dec_and_test(&net->passive)) {
+@@ -475,3 +488,6 @@ void net_drop_ns(void *p)
+ 	if (net && refcount_dec_and_test(&net->passive)) {
  		kfree(rcu_access_pointer(net->gen));
 +#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
 +		kfree(net->sctp_ptr);
 +#endif
  		/* There should not be any trackers left there. */
- 		ref_tracker_dir_exit(&net->notrefcnt_tracker);
