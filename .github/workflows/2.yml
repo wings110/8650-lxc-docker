@@ -1,4 +1,4 @@
-name: new加速版构建 6.1.118 欧加真OKI内核
+name: 1new加速版构建 6.1.118 欧加真OKI内核
 
 env:
   TZ: Asia/Shanghai
@@ -6,7 +6,7 @@ env:
   KERNEL_VERSION: '6.1'
   SUB_VERSION: '118'
   KERNEL_NAME: 'android14-11-o-gca13bffobf09'
-  CCACHE_KEY: ccache-neov4-6.1.118
+  CCACHE_KEY: ccache-lxc-6.1.118
 
 on:
   workflow_dispatch:
@@ -106,6 +106,17 @@ jobs:
       actions: write
       contents: read
     steps:
+      - name: 释放磁盘空间 (解决后台 I/O 争抢问题)
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
       - name: 安装环境依赖+初始化源码仓库及llvm-Clang20工具链
         run: |
           rm -rf kernel_workspace
@@ -150,7 +161,7 @@ jobs:
       - name: 配置ccache目录
         run: |
           echo "CCACHE_DIR=$HOME/.ccache_${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}" >> $GITHUB_ENV
-          echo "CCACHE_MAXSIZE=3G" >> $GITHUB_ENV
+          echo "CCACHE_MAXSIZE=5G" >> $GITHUB_ENV
           echo "当前磁盘空间："
           df -h
           echo "当前构建内核版本：${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}"
@@ -208,12 +219,21 @@ jobs:
           export CCACHE_DIR="${{ env.CCACHE_DIR }}"
           export CCACHE_MAXSIZE="${{ env.CCACHE_MAXSIZE }}"
           
+          echo ">>> 1. 检查磁盘剩余空间..."
+          df -h
+          
+          echo ">>> 2. 净化缓存目录权限与配置..."
           mkdir -p "$CCACHE_DIR"
-          echo "配置ccache缓存大小为: $CCACHE_MAXSIZE"
+          chmod -R 777 "$CCACHE_DIR" || true
+          rm -f "$CCACHE_DIR/ccache.conf"
+          
+          echo ">>> 3. 配置ccache缓存大小为: $CCACHE_MAXSIZE"
           ccache -M "$CCACHE_MAXSIZE"
           ccache -o compression=true
-          echo "ccache初始状态:"
+          
+          echo ">>> 4. ccache初始状态:"
           ccache -s
+          
           if [ "${{ steps.ccache-restore.outputs.cache-hit }}" == 'true' ]; then
             echo "ccache缓存命中详情:"
             ccache -sv
@@ -486,7 +506,7 @@ jobs:
             done
           fi
 
-# ================== 核心升级：云端一键提取与找茬 ==================
+      # ================== 核心升级：云端一键提取与找茬 ==================
       - name: 【云端 ABI 排雷】编译并提取结构体分析报告
         if: inputs.vmlinux_debug == true
         run: |
@@ -527,34 +547,36 @@ jobs:
           echo "========================================="
           echo ">>> 1. 编译对照组 (OFF) 并生成报告 ..."
           echo "========================================="
+          echo "# CONFIG_IP_SCTP is not set" >> arch/arm64/configs/gki_defconfig
+          
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error vmlinux
           
-          echo ">>> 提取对照组 struct net_device 结构..."
-          pahole -C net_device out/vmlinux > ../net_device_off.txt
+          echo ">>> 提取对照组 struct net 和 struct sk_buff 结构..."
+          pahole -C net out/vmlinux > ../net_off.txt
+          pahole -C sk_buff out/vmlinux > ../skb_off.txt
           
           echo "========================================="
           echo ">>> 2. 编译实验组 (ON) 并生成报告 ..."
           echo "========================================="
-          # 【修改点】：注入开启 IPVLAN 及 IPVLAN_L3S 的相关配置
-          echo "CONFIG_IPVLAN=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IPVLAN_L3S=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_IP_SCTP=y" >> arch/arm64/configs/gki_defconfig
           
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error vmlinux
           
-          echo ">>> 提取实验组 struct net_device 结构..."
-          pahole -C net_device out/vmlinux > ../net_device_on.txt
+          echo ">>> 提取实验组 struct net 和 struct sk_buff 结构..."
+          pahole -C net out/vmlinux > ../net_on.txt
+          pahole -C sk_buff out/vmlinux > ../skb_on.txt
           
           echo "========================================="
           echo ">>> 3. 在云端进行 diff 差异比对 ..."
           echo "========================================="
           cd ..
-          # 对 net_device 进行比对，不让流水线中断
-          diff -u net_device_off.txt net_device_on.txt > abi_diff_net_device_report.txt || true
+          diff -u net_off.txt net_on.txt > abi_diff_net_report.txt || true
+          diff -u skb_off.txt skb_on.txt > abi_diff_skb_report.txt || true
           
           echo ">>> 正在打包所有文本报告..."
-          zip abi_analysis_reports.zip net_device_off.txt net_device_on.txt abi_diff_net_device_report.txt
+          zip abi_analysis_reports.zip net_off.txt net_on.txt skb_off.txt skb_on.txt abi_diff_net_report.txt abi_diff_skb_report.txt
           echo "✅ 云端排雷分析完成！准备上传压缩包。"
 
       - name: 上传 ABI 分析报告 (排雷专用)
@@ -566,7 +588,7 @@ jobs:
           compression-level: 0
 
       # ================== 以下为常规刷机包流程 (排雷模式下被拦截) ==================
-      - name: 构建内核
+      - name: 构建内核 (纯净加速版)
         if: inputs.vmlinux_debug == false
         run: |
           WORKDIR="$(pwd)"
@@ -587,47 +609,14 @@ jobs:
           export CCACHE_NOHASHDIR="true"
           export CCACHE_HARDLINK="true"
           export CCACHE_DIR="${{ env.CCACHE_DIR }}"
-          export CCACHE_MAXSIZE="3G"
+          export CCACHE_MAXSIZE="5G"
           echo "sloppiness = file_stat_matches,include_file_ctime,include_file_mtime,pch_defines,file_macro,time_macros" >> "$CCACHE_DIR/ccache.conf"
           
           cd kernel_workspace/common
-          wget --header="Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/lib/libfakestat.so || true
-          wget --header="Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/lib/libfaketimeMT.so || true
-          chmod 777 ./*.so || true
-          export FAKESTAT="2025-05-25 12:00:00"
-          export FAKETIME="@2025-05-25 13:00:00"
-          echo "FAKESTAT=$FAKESTAT" >> $GITHUB_ENV
-          echo "FAKETIME=$FAKETIME" >> $GITHUB_ENV
-          SO_DIR=$(pwd)
-          export PRELOAD_LIBS="$SO_DIR/libfakestat.so $SO_DIR/libfaketimeMT.so"
-          echo '#!/bin/bash' > cc-wrapper
-          echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> cc-wrapper
-          echo 'export FAKESTAT="'$FAKESTAT'"' >> cc-wrapper
-          echo 'export FAKETIME="'$FAKETIME'"' >> cc-wrapper
-          echo 'ccache clang "$@"' >> cc-wrapper
-          echo '#!/bin/bash' > ld-wrapper
-          echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> ld-wrapper
-          echo 'export FAKESTAT="'$FAKESTAT'"' >> ld-wrapper
-          echo 'export FAKETIME="'$FAKETIME'"' >> ld-wrapper
-          echo 'ld.lld "$@"' >> ld-wrapper
           
-          echo '#!/bin/bash' > test-wrapper.sh
-          echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> test-wrapper.sh
-          echo 'export FAKESTAT="'$FAKESTAT'"' >> test-wrapper.sh
-          echo 'export FAKETIME="'$FAKETIME'"' >> test-wrapper.sh
-          echo 'echo ">>> Wrapper 内部环境检查完毕."' >> test-wrapper.sh
-          echo 'exec "$@"' >> test-wrapper.sh
-          chmod +x test-wrapper.sh
-          ./test-wrapper.sh date
-          ./test-wrapper.sh stat ./Makefile
-          chmod +x cc-wrapper ld-wrapper
-          
-          sudo rm -rf /usr/share/dotnet &
-          sudo rm -rf /usr/local/lib/android &
-          sudo rm -rf /opt/ghc &
-          sudo rm -rf /opt/hostedtoolcache/CodeQL &
+          # 【核心优化】移除了极其耗时的时间劫持 wrapper 和后台 rm 争抢，直接使用 ccache 编译
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" LD="ld.lld" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig &&
-          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error Image
+          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" LD="ld.lld" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error Image
           
           echo "内核编译完成！"
           ccache -s
@@ -700,6 +689,7 @@ jobs:
           fi
           zip -r ../$AK3_NAME ./*
           echo "ak3name=$AK3_NAME" >> $GITHUB_OUTPUT
+          echo "生成的 zip 文件: $AK3_NAME"
           
           if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
             FULL_VERSION=${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}-${{ github.event.inputs.kernel_suffix }}
@@ -739,12 +729,14 @@ jobs:
         if: inputs.vmlinux_debug == false
         uses: actions/upload-artifact@v4
         with:
+          name: kernel-zip-${{ github.run_id }}
           path: ${{ github.workspace }}/kernel_workspace/AnyKernel*.zip
-          archive: false
+          if-no-files-found: error
+          retention-days: 7
 
   release:
     needs: build
-    if: inputs.vmlinux_debug == false
+    if: inputs.vmlinux_debug == false && needs.build.result == 'success' && needs.build.outputs.ak3name != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -752,12 +744,31 @@ jobs:
       actions: read
 
     steps:
+      - name: 等待 artifact 准备就绪
+        run: |
+          echo "等待 artifact 可用..."
+          sleep 10
+          
       - name: 下载 ZIP 工件
         uses: actions/download-artifact@v4
         with:
-          name: ${{ needs.build.outputs.ak3name }}
+          pattern: kernel-zip-*
           path: ./release_zips
-          skip-decompress: true
+          merge-multiple: true
+          
+      - name: 验证下载的文件
+        run: |
+          echo "下载的文件列表："
+          ls -la ./release_zips/
+          if [ ! -f ./release_zips/AnyKernel3_*.zip ] && [ ! -f ./release_zips/*.zip ]; then
+            echo "错误：未找到 AnyKernel zip 文件！"
+            exit 1
+          fi
+          # 重命名找到的第一个 zip 文件为标准名称
+          ZIP_FILE=$(find ./release_zips -name "AnyKernel3_*.zip" -o -name "*.zip" | head -1)
+          if [ -n "$ZIP_FILE" ] && [ ! -f "./release_zips/${{ needs.build.outputs.ak3name }}" ]; then
+            cp "$ZIP_FILE" "./release_zips/${{ needs.build.outputs.ak3name }}"
+          fi
 
       - name: 设置环境变量
         run: |
@@ -788,7 +799,7 @@ jobs:
             KSU_TYPENAME="无内置KSU"
           fi
           echo "KSU_TYPENAME=$KSU_TYPENAME" >> $GITHUB_ENV
-         
+          
       - name: 创建发布
         id: create_release
         env:
@@ -829,8 +840,14 @@ jobs:
           #### ※※※刷写内核有风险，为防止出现意外导致手机变砖，在刷入内核前请务必用[KernelFlasher](https://github.com/capntrips/KernelFlasher)等软件备份boot等关键启动分区!※※※
           EOF
 
+          # 找到实际的 zip 文件
+          ZIP_FILE=$(find ./release_zips -name "AnyKernel3_*.zip" | head -1)
+          if [ -z "$ZIP_FILE" ]; then
+            ZIP_FILE=$(find ./release_zips -name "*.zip" | head -1)
+          fi
+          
           gh release create "${{ env.TAG_HEAD }}-${{ env.TIME }}" \
             --repo "${{ github.repository }}" \
             --title "${{ env.TAG_HEAD }}-${{ env.FULL_VERSION }}" \
             --notes-file release_notes.md \
-            release_zips/AnyKernel3_*.zip
+            "$ZIP_FILE"
