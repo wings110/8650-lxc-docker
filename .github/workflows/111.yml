@@ -130,7 +130,7 @@ jobs:
           sudo apt purge man-db &&
           sudo rm -rf /var/lib/man-db/auto-update &&
           sudo apt update &&
-          sudo apt-get install -y --no-install-recommends binutils python-is-python3 libssl-dev libelf-dev zstd dwarves zip
+          sudo apt-get install -y --no-install-recommends binutils python-is-python3 libssl-dev libelf-dev zstd dwarves zip pkg-config
           
           echo "正在克隆源码仓库..."
           aria2c -s16 -x16 -k1M https://github.com/cctv18/android_kernel_common_oneplus_sm8650/archive/refs/heads/oneplus/sm8650_b_16.0.0_oneplus12.zip -o common.zip && 
@@ -609,8 +609,8 @@ jobs:
           echo "========================================="
           echo "# CONFIG_IP_SCTP is not set" >> arch/arm64/configs/gki_defconfig
           
-          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig
-          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error vmlinux
+          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld HOSTCFLAGS="-I/usr/include" HOSTLDFLAGS="-L/usr/lib/x86_64-linux-gnu" O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig
+          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld HOSTCFLAGS="-I/usr/include" HOSTLDFLAGS="-L/usr/lib/x86_64-linux-gnu" O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error vmlinux
           
           echo ">>> 提取对照组 struct net 和 struct sk_buff 结构..."
           pahole -C net out/vmlinux > ../net_off.txt
@@ -621,8 +621,8 @@ jobs:
           echo "========================================="
           echo "CONFIG_IP_SCTP=y" >> arch/arm64/configs/gki_defconfig
           
-          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig
-          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error vmlinux
+          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld HOSTCFLAGS="-I/usr/include" HOSTLDFLAGS="-L/usr/lib/x86_64-linux-gnu" O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig
+          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld HOSTCFLAGS="-I/usr/include" HOSTLDFLAGS="-L/usr/lib/x86_64-linux-gnu" O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error vmlinux
           
           echo ">>> 提取实验组 struct net 和 struct sk_buff 结构..."
           pahole -C net out/vmlinux > ../net_on.txt
@@ -675,8 +675,8 @@ jobs:
           cd kernel_workspace/common
           
           # 【核心优化】移除了极其耗时的时间劫持 wrapper 和后台 rm 争抢，直接使用 ccache 编译
-          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" LD="ld.lld" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig &&
-          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" LD="ld.lld" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error Image
+          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" LD="ld.lld" HOSTLD=ld.lld HOSTCFLAGS="-I/usr/include" HOSTLDFLAGS="-L/usr/lib/x86_64-linux-gnu" O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig &&
+          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" LD="ld.lld" HOSTLD=ld.lld HOSTCFLAGS="-I/usr/include" HOSTLDFLAGS="-L/usr/lib/x86_64-linux-gnu" O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error Image
           
           echo "内核编译完成！"
           ccache -s
