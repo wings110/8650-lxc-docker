@@ -530,35 +530,31 @@ jobs:
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error vmlinux
           
-          echo ">>> 提取对照组 struct net 和 struct sk_buff 结构..."
-          pahole -C net out/vmlinux > ../net_off.txt
-          pahole -C sk_buff out/vmlinux > ../skb_off.txt
+          echo ">>> 提取对照组 struct net_device 结构..."
+          pahole -C net_device out/vmlinux > ../net_device_off.txt
           
           echo "========================================="
           echo ">>> 2. 编译实验组 (ON) 并生成报告 ..."
           echo "========================================="
-          # 【修改点】：删除 NFTABLES，注入开启 IP_VS 的相关配置
-          echo "CONFIG_IP_VS=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_VS_PROTO_TCP=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_VS_PROTO_UDP=y" >> arch/arm64/configs/gki_defconfig
+          # 【修改点】：注入开启 IPVLAN 及 IPVLAN_L3S 的相关配置
+          echo "CONFIG_IPVLAN=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_IPVLAN_L3S=y" >> arch/arm64/configs/gki_defconfig
           
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error vmlinux
           
-          echo ">>> 提取实验组 struct net 和 struct sk_buff 结构..."
-          pahole -C net out/vmlinux > ../net_on.txt
-          pahole -C sk_buff out/vmlinux > ../skb_on.txt
+          echo ">>> 提取实验组 struct net_device 结构..."
+          pahole -C net_device out/vmlinux > ../net_device_on.txt
           
           echo "========================================="
           echo ">>> 3. 在云端进行 diff 差异比对 ..."
           echo "========================================="
           cd ..
-          # 分别对 net 和 skb 进行比对，不让流水线中断
-          diff -u net_off.txt net_on.txt > abi_diff_net_report.txt || true
-          diff -u skb_off.txt skb_on.txt > abi_diff_skb_report.txt || true
+          # 对 net_device 进行比对，不让流水线中断
+          diff -u net_device_off.txt net_device_on.txt > abi_diff_net_device_report.txt || true
           
           echo ">>> 正在打包所有文本报告..."
-          zip abi_analysis_reports.zip net_off.txt net_on.txt skb_off.txt skb_on.txt abi_diff_net_report.txt abi_diff_skb_report.txt
+          zip abi_analysis_reports.zip net_device_off.txt net_device_on.txt abi_diff_net_device_report.txt
           echo "✅ 云端排雷分析完成！准备上传压缩包。"
 
       - name: 上传 ABI 分析报告 (排雷专用)
@@ -838,4 +834,3 @@ jobs:
             --title "${{ env.TAG_HEAD }}-${{ env.FULL_VERSION }}" \
             --notes-file release_notes.md \
             release_zips/AnyKernel3_*.zip
-            
