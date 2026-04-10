@@ -1,79 +1,82 @@
-- name: 【核心手术】无痕植入 SCTP ABI 修复代码 (Python 动态探针版)
-        run: |
-          echo ">>> 正在使用 Python 探针精准修复 SCTP ABI..."
-          cd kernel_workspace/common
-          
-          # 1. 使用 Python 脚本处理头文件 (100%免疫上下文冲突，智能识别一加特有 Padding)
-          cat << 'EOF' > fix_sctp_abi.py
-          import re
-          import sys
-          
-          file_path = 'include/net/net_namespace.h'
-          with open(file_path, 'r') as f:
-              content = f.read()
-          
-          # 步骤 A：精准切除结构体中间的旧 sctp (防膨胀)
-          content = re.sub(r'#if defined\(CONFIG_IP_SCTP\)[^\n]*\n\s*struct netns_sctp\s+sctp;\n#endif\n', '', content)
-          
-          # 步骤 B：寻找一加/欧加特有的强制填充位，或者标准 KABI
-          matches_sock = list(re.finditer(r'struct\s+sock\s*\*\s*:\s*64\s*;', content))
-          matches_kabi = list(re.finditer(r'ANDROID_KABI_RESERVE\(\d+\);', content))
-          
-          if matches_sock:
-              last_match = matches_sock[-1]
-              replacement = """
-          	/* ABI Hack: SCTP Pointer (Replaced last sock padding) */
-          	union {
-          		struct sock * :64;
-          		struct {
-          #if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
-          			struct netns_sctp *sctp_ptr;
-          #endif
-          		};
-          	};"""
-              content = content[:last_match.start()] + replacement + content[last_match.end():]
-              print("✅ 成功替换一加特有 struct sock * :64 padding!")
-          elif matches_kabi:
-              last_match = matches_kabi[-1]
-              res_str = last_match.group(0)
-              replacement = f"""
-          	/* ABI Hack: SCTP Pointer (Replaced KABI Reserve) */
-          	union {{
-          		struct {{
-          			{res_str}
-          		}};
-          		struct {{
-          #if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
-          			struct netns_sctp *sctp_ptr;
-          #endif
-          		}};
-          	}};"""
-              content = content[:last_match.start()] + replacement + content[last_match.end():]
-              print(f"✅ 成功替换 {res_str} padding!")
-          else:
-              print("⚠️ 未找到任何 padding，直接在 } __randomize_layout; 前插入！")
-              idx = content.rfind('} __randomize_layout;')
-              if idx != -1:
-                  replacement = """
-          #if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
-          	struct netns_sctp *sctp_ptr;
-          #endif\n"""
-                  content = content[:idx] + replacement + content[idx:]
-          
-          # 步骤 C：追加重定向宏
-          content += "\n#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)\n#define net_sctp(_net) (*((_net)->sctp_ptr))\n#endif\n"
-          
-          with open(file_path, 'w') as f:
-              f.write(content)
-          print("✅ 头文件动态处理完成！")
-          EOF
-          
-          # 执行 Python 探针脚本
-          python3 fix_sctp_abi.py
-          
-          # 2. 为 net_namespace.c 生成并应用补丁 (这段 C 代码之前验证成功过)
-          echo "LS0tIGEvbmV0L2NvcmUvbmV0X25hbWVzcGFjZS5jCisrKyBiL25ldC9jb3JlL25ldF9uYW1lc3BhY2UuYwpAQCAtNDIxLDYgKzQyMSwxMyBAQAogIAluZXQgPSBrbWVtX2NhY2hlX3phbGxvYyhuZXRfY2FjaGVwLCBHRlBfS0VSTkVMKTsKICAJaWYgKCFuZXQpCiAgCQlnb3RvIG91dF9mcmVlOworCisjaWYgZGVmaW5lZChDT05GSUdfSVBfU0NUUCkgfHwgZGVmaW5lZChDT05GSUdfSVBfU0NUUF9NT0RVTEUpCisJbmV0LT5zY3RwX3B0ciA9IGt6YWxsb2Moc2l6ZW9mKHN0cnVjdCBuZXRuc19zY3RwKSwgR0ZQX0tFUk5FTCk7CisJaWYgKCFuZXQtPnNjdHBfcHRyKSB7CisJCWdvdG8gb3V0X2ZyZWVfbmV0OworCX0KKyNlbmRpZgogIAogI2lmZGVmIENPTkZJR19LRVlTCiAgCW5ldC0+a2V5X2RvbWFpbiA9IGt6YWxsb2Moc2l6ZW9mKHN0cnVjdCBrZXlfdGFnKSwgR0ZQX0tFUk5FTCk7CkBAIC00MzQsNiArNDQxLDExIEBACiAgCXJldHVybiBuZXQ7CiAKICNpZmRlZiBDT05GSUdfS0VZUworb3V0X2ZyZWVfZXh0OgorI2lmIGRlZmluZWQoQ09ORklHX0lQX1NDVFApIHx8IGRlZmluZWQoQ09ORklHX0lQX1NDVFBfTU9EVUxFKQorCWtmcmVlKG5ldC0+c2N0cF9wdHIpOworb3V0X2ZyZWVfbmV0OgorI2VuZGlmCiBvdXRfZnJlZV8yOgogIAlrbWVtX2NhY2hlX2ZyZWUobmV0X2NhY2hlcCwgbmV0KTsKICAJbmV0ID0gTlVMTDsKQEAgLTQ2Miw2ICs0NzQsOSBAQAogIHsKICAJaWYgKHJlZmNvdW50X2RlY19hbmRfdGVzdCgmbmV0LT5wYXNzaXZlKSkgewogIAkJa2ZyZWUocmN1X2FjY2Vzc19wb2ludGVyKG5ldC0+Z2VuKSk7CisjaWYgZGVmaW5lZChDT05GSUdfSVBfU0NUUCkgfHwgZGVmaW5lZChDT05GSUdfSVBfU0NUUF9NT0RVTEUpCisJCWtmcmVlKG5ldC0+c2N0cF9wdHIpOworI2VuZGlmCiAgCQkvKiBUaGVyZSBzaG91bGQgbm90IGJlIGFueSB0cmFja2VycyBsZWZ0IHRoZXJlLiAqLwogIAkJcmVmX3RyYWNrZXJfZGlyX2V4aXQoJm5ldC0+bm90cmVmY250X3RyYWNrZXIpOwo=" | base64 -d > sctp_c.patch
-          echo "" >> sctp_c.patch
-          
-          patch -l -p1 -F 3 < sctp_c.patch
-          echo "✅ SCTP 手术全部完成！"
+diff --git a/common/include/net/net_namespace.h b/common/include/net/net_namespace.h
+--- a/common/include/net/net_namespace.h
++++ b/common/include/net/net_namespace.h
+@@ -134,9 +134,6 @@ struct net {
+ #if IS_ENABLED(CONFIG_IEEE802154_6LOWPAN)
+  	struct netns_ieee802154_lowpan	ieee802154_lowpan;
+ #endif
+-#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
+-	struct netns_sctp	sctp;
+-#endif
+ #ifdef CONFIG_NETFILTER
+  	struct netns_nf		nf;
+ #if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
+@@ -188,6 +185,15 @@ struct net {
+ 	struct sock		*diag_nlsk;
+  
+ 	/* Force padding: */
+-	struct sock		*:64;
++	/* ABI Hack: 存放独立的 SCTP 结构体防止位移 */
++	union {
++		struct sock		*:64;
++		struct {
++#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
++			struct sctp_ext *sctp_ptr;
++#endif
++		};
++	};
+ 	struct sock		*:64;
+ 	struct sock		*:64;
+ 	struct sock		*:64;
+@@ -450,4 +456,12 @@ static inline void net_ns_init(void) {}
+ #endif
+  
++#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
++struct sctp_ext {
++	struct net *net;
++	struct netns_sctp sctp;
++};
++#define net_sctp(_net) ((_net)->sctp_ptr->sctp)
++#endif
++
+ #endif /* __NET_NET_NAMESPACE_H */
+diff --git a/common/net/core/net_namespace.c b/common/net/core/net_namespace.c
+--- a/common/net/core/net_namespace.c
++++ b/common/net/core/net_namespace.c
+@@ -421,6 +421,15 @@ static struct net *net_alloc(void)
+ 	net = kmem_cache_zalloc(net_cachep, GFP_KERNEL);
+ 	if (!net)
+ 		goto out_free;
++
++#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
++	/* 为 SCTP 结构体申请独立内存 */
++	net->sctp_ptr = kzalloc(sizeof(struct sctp_ext), GFP_KERNEL);
++	if (!net->sctp_ptr) {
++		goto out_free_net;
++	}
++	net->sctp_ptr->net = net;
++#endif
+  
+ #ifdef CONFIG_KEYS
+ 	net->key_domain = kzalloc(sizeof(struct key_tag), GFP_KERNEL);
+@@ -434,6 +443,11 @@ static struct net *net_alloc(void)
+ 	return net;
+  
+ #ifdef CONFIG_KEYS
++out_free_ext:
++#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
++	kfree(net->sctp_ptr);
++out_free_net:
++#endif
+ out_free_2:
+ 	kmem_cache_free(net_cachep, net);
+ 	net = NULL;
+@@ -462,6 +476,9 @@ void net_drop_ns(void *p)
+ {
+ 	if (refcount_dec_and_test(&net->passive)) {
+ 		kfree(rcu_access_pointer(net->gen));
++#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
++		kfree(net->sctp_ptr);
++#endif
+ 		/* There should not be any trackers left there. */
+ 		ref_tracker_dir_exit(&net->notrefcnt_tracker);
