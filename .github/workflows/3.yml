@@ -219,12 +219,21 @@ jobs:
           export CCACHE_DIR="${{ env.CCACHE_DIR }}"
           export CCACHE_MAXSIZE="${{ env.CCACHE_MAXSIZE }}"
           
+          echo ">>> 1. 检查磁盘剩余空间..."
+          df -h
+          
+          echo ">>> 2. 净化缓存目录权限与配置..."
           mkdir -p "$CCACHE_DIR"
-          echo "配置ccache缓存大小为: $CCACHE_MAXSIZE"
+          chmod -R 777 "$CCACHE_DIR" || true
+          rm -f "$CCACHE_DIR/ccache.conf"
+          
+          echo ">>> 3. 配置ccache缓存大小为: $CCACHE_MAXSIZE"
           ccache -M "$CCACHE_MAXSIZE"
           ccache -o compression=true
-          echo "ccache初始状态:"
+          
+          echo ">>> 4. ccache初始状态:"
           ccache -s
+          
           if [ "${{ steps.ccache-restore.outputs.cache-hit }}" == 'true' ]; then
             echo "ccache缓存命中详情:"
             ccache -sv
@@ -493,7 +502,7 @@ jobs:
             done
           fi
 
-# ================== 核心升级：云端一键提取与找茬 ==================
+      # ================== 核心升级：云端一键提取与找茬 ==================
       - name: 【云端 ABI 排雷】编译并提取结构体分析报告
         if: inputs.vmlinux_debug == true
         run: |
@@ -786,7 +795,7 @@ jobs:
             KSU_TYPENAME="无内置KSU"
           fi
           echo "KSU_TYPENAME=$KSU_TYPENAME" >> $GITHUB_ENV
-         
+          
       - name: 创建发布
         id: create_release
         env:
