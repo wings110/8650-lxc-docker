@@ -1,0 +1,10 @@
+--- a/common/drivers/net/Kconfig
++++ b/common/drivers/net/Kconfig
+@@ -193,6 +193,7 @@
+ 
+ config IPVLAN_L3S
++	depends on BROKEN
+ 	depends on NETFILTER
+ 	depends on IPVLAN
+ 	def_bool y
+ 	select NET_L3_MASTER_DEV
