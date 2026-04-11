@@ -1,4 +1,4 @@
-name: 2123sctp-new加速版构建 6.1.118 欧加真OKI内核
+name: 1123sctp-new加速版构建 6.1.118 欧加真OKI内核
 
 env:
   TZ: Asia/Shanghai
@@ -290,12 +290,92 @@ jobs:
             
             echo "✅ SCTP 修复完成"
             
-            # 验证修复结果
-            if grep -q "&net->sctp" net/sctp/sysctl.c 2>/dev/null; then
-              echo "✅ 验证：sysctl.c 已修复"
-            else
-              echo "⚠️ 验证：sysctl.c 可能未修复"
+            # ========== 完整验证所有 SCTP 文件 ==========
+            echo ""
+            echo "========== 完整验证 SCTP 修复结果 =========="
+            
+            # 统计修复的文件数量
+            FIXED_COUNT=$(grep -r "&net->sctp" net/sctp/ --include="*.c" 2>/dev/null | wc -l)
+            echo "包含 &net->sctp 的代码行数: $FIXED_COUNT"
+            
+            # 逐个检查主要文件
+            echo ""
+            echo "逐个文件检查:"
+            
+            # 检查 sysctl.c
+            if [ -f "net/sctp/sysctl.c" ]; then
+              if grep -q "&net->sctp" net/sctp/sysctl.c 2>/dev/null; then
+                echo "  ✅ sysctl.c - 已修复"
+              else
+                echo "  ⚠️ sysctl.c - 未修复"
+              fi
             fi
+            
+            # 检查 protocol.c
+            if [ -f "net/sctp/protocol.c" ]; then
+              if grep -q "&net->sctp" net/sctp/protocol.c 2>/dev/null; then
+                echo "  ✅ protocol.c - 已修复"
+              else
+                echo "  ⚠️ protocol.c - 未修复"
+              fi
+            fi
+            
+            # 检查 socket.c
+            if [ -f "net/sctp/socket.c" ]; then
+              if grep -q "&net->sctp" net/sctp/socket.c 2>/dev/null; then
+                echo "  ✅ socket.c - 已修复"
+              else
+                echo "  ⚠️ socket.c - 未修复"
+              fi
+            fi
+            
+            # 检查 associola.c
+            if [ -f "net/sctp/associola.c" ]; then
+              if grep -q "&net->sctp" net/sctp/associola.c 2>/dev/null; then
+                echo "  ✅ associola.c - 已修复"
+              else
+                echo "  ⚠️ associola.c - 未修复（可能不需要修复）"
+              fi
+            fi
+            
+            # 检查 auth.c
+            if [ -f "net/sctp/auth.c" ]; then
+              if grep -q "&net->sctp" net/sctp/auth.c 2>/dev/null; then
+                echo "  ✅ auth.c - 已修复"
+              else
+                echo "  ⚠️ auth.c - 未修复（可能不需要修复）"
+              fi
+            fi
+            
+            # 检查 bind_addr.c
+            if [ -f "net/sctp/bind_addr.c" ]; then
+              if grep -q "&net->sctp" net/sctp/bind_addr.c 2>/dev/null; then
+                echo "  ✅ bind_addr.c - 已修复"
+              else
+                echo "  ⚠️ bind_addr.c - 未修复（可能不需要修复）"
+              fi
+            fi
+            
+            # 检查 chunk.c
+            if [ -f "net/sctp/chunk.c" ]; then
+              if grep -q "&net->sctp" net/sctp/chunk.c 2>/dev/null; then
+                echo "  ✅ chunk.c - 已修复"
+              else
+                echo "  ⚠️ chunk.c - 未修复（可能不需要修复）"
+              fi
+            fi
+            
+            # 检查头文件
+            if [ -f "include/net/sctp/structs.h" ]; then
+              if grep -q "struct netns_sctp sctp" include/net/sctp/structs.h 2>/dev/null; then
+                echo "  ✅ include/net/sctp/structs.h - 已修复"
+              else
+                echo "  ⚠️ include/net/sctp/structs.h - 未修复"
+              fi
+            fi
+            
+            echo ""
+            echo "✅ SCTP 完整验证完成"
           else
             echo "❌ net/sctp 不存在"
           fi
@@ -493,12 +573,92 @@ jobs:
               
               echo "✅ SCTP 修复完成"
               
-              # 验证修复结果
-              if grep -q "&net->sctp" net/sctp/sysctl.c 2>/dev/null; then
-                echo "✅ 验证：sysctl.c 已修复"
-              else
-                echo "⚠️ 验证：sysctl.c 可能未修复"
+              # ========== 完整验证所有 SCTP 文件 ==========
+              echo ""
+              echo "========== 完整验证 SCTP 修复结果 =========="
+              
+              # 统计修复的文件数量
+              FIXED_COUNT=$(grep -r "&net->sctp" net/sctp/ --include="*.c" 2>/dev/null | wc -l)
+              echo "包含 &net->sctp 的代码行数: $FIXED_COUNT"
+              
+              # 逐个检查主要文件
+              echo ""
+              echo "逐个文件检查:"
+              
+              # 检查 sysctl.c
+              if [ -f "net/sctp/sysctl.c" ]; then
+                if grep -q "&net->sctp" net/sctp/sysctl.c 2>/dev/null; then
+                  echo "  ✅ sysctl.c - 已修复"
+                else
+                  echo "  ⚠️ sysctl.c - 未修复"
+                fi
               fi
+              
+              # 检查 protocol.c
+              if [ -f "net/sctp/protocol.c" ]; then
+                if grep -q "&net->sctp" net/sctp/protocol.c 2>/dev/null; then
+                  echo "  ✅ protocol.c - 已修复"
+                else
+                  echo "  ⚠️ protocol.c - 未修复"
+                fi
+              fi
+              
+              # 检查 socket.c
+              if [ -f "net/sctp/socket.c" ]; then
+                if grep -q "&net->sctp" net/sctp/socket.c 2>/dev/null; then
+                  echo "  ✅ socket.c - 已修复"
+                else
+                  echo "  ⚠️ socket.c - 未修复"
+                fi
+              fi
+              
+              # 检查 associola.c
+              if [ -f "net/sctp/associola.c" ]; then
+                if grep -q "&net->sctp" net/sctp/associola.c 2>/dev/null; then
+                  echo "  ✅ associola.c - 已修复"
+                else
+                  echo "  ⚠️ associola.c - 未修复（可能不需要修复）"
+                fi
+              fi
+              
+              # 检查 auth.c
+              if [ -f "net/sctp/auth.c" ]; then
+                if grep -q "&net->sctp" net/sctp/auth.c 2>/dev/null; then
+                  echo "  ✅ auth.c - 已修复"
+                else
+                  echo "  ⚠️ auth.c - 未修复（可能不需要修复）"
+                fi
+              fi
+              
+              # 检查 bind_addr.c
+              if [ -f "net/sctp/bind_addr.c" ]; then
+                if grep -q "&net->sctp" net/sctp/bind_addr.c 2>/dev/null; then
+                  echo "  ✅ bind_addr.c - 已修复"
+                else
+                  echo "  ⚠️ bind_addr.c - 未修复（可能不需要修复）"
+                fi
+              fi
+              
+              # 检查 chunk.c
+              if [ -f "net/sctp/chunk.c" ]; then
+                if grep -q "&net->sctp" net/sctp/chunk.c 2>/dev/null; then
+                  echo "  ✅ chunk.c - 已修复"
+                else
+                  echo "  ⚠️ chunk.c - 未修复（可能不需要修复）"
+                fi
+              fi
+              
+              # 检查头文件
+              if [ -f "include/net/sctp/structs.h" ]; then
+                if grep -q "struct netns_sctp sctp" include/net/sctp/structs.h 2>/dev/null; then
+                  echo "  ✅ include/net/sctp/structs.h - 已修复"
+                else
+                  echo "  ⚠️ include/net/sctp/structs.h - 未修复"
+                fi
+              fi
+              
+              echo ""
+              echo "✅ SCTP 完整验证完成"
             else
               echo "❌ net/sctp 不存在"
             fi
@@ -573,4 +733,4 @@ jobs:
         run: |
           gh release create "Build-${{ github.run_id }}" ./*.zip \
             --title "欧加真 6.1.118 SCTP-LXC 加速版" \
-            --notes "包含 LXC/Docker 补丁与完整环境支持\n- 修复 SCTP 源码缺失问题（改用 git clone）\n- 优化补丁应用流程\n- 添加 SCTP ABI 补丁验证步骤"
+            --notes "包含 LXC/Docker 补丁与完整环境支持\n- 修复 SCTP 源码缺失问题（改用 git clone）\n- 优化补丁应用流程\n- 添加 SCTP ABI 补丁验证步骤\n- 添加完整的 SCTP 修复验证"
