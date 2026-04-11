@@ -1,4 +1,4 @@
-name: 0123sctp-new加速版构建 6.1.118 欧加真OKI内核
+name: 1123sctp-new加速版构建 6.1.118 欧加真OKI内核
 
 env:
   TZ: Asia/Shanghai
@@ -107,46 +107,14 @@ jobs:
       actions: write
       contents: read
     steps:
-      - name: 额外激进清理磁盘
-        run: |
-          echo "========== 开始激进清理 =========="
-          
-          sudo apt-mark hold firefox || true
-          sudo apt-mark hold libc-bin || true
-          sudo apt purge -y man-db || true
-          sudo rm -rf /var/lib/man-db/auto-update
-          
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/share/boost
-          sudo rm -rf /usr/share/swift
-          sudo rm -rf /usr/lib/jvm
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo rm -rf /opt/microsoft
-          sudo rm -rf /usr/local/graalvm
-          sudo rm -rf /opt/az
-          sudo rm -rf /usr/share/az_
-          
-          sudo apt clean
-          sudo apt autoclean
-          sudo apt autoremove --purge -y
-          sudo rm -rf /var/lib/apt/lists/*
-          sudo rm -rf /var/cache/apt/archives/*.deb
-          
-          sudo journalctl --vacuum-size=10M
-          sudo rm -rf /tmp/* /var/tmp/*
-          rm -rf ~/.cache/* ~/.npm ~/.cargo ~/.rustup ~/.local/share/pip
-          
-          sudo rm -rf /var/lib/docker || true
-          sudo rm -rf /var/lib/containerd || true
-          
-          sudo find / -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-          
-          echo "========== 清理完成 =========="
-          df -h
-          FREE_GB=$(df / | awk 'NR==2 {print int($4/1024/1024)}')
-          echo "可用空间: ${FREE_GB}GB"
+      - name: 释放磁盘空间
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-docker-images: 'true'
 
       - name: 安装环境依赖+初始化源码（使用 git clone）
         run: |
@@ -453,4 +421,4 @@ jobs:
         run: |
           gh release create "Build-${{ github.run_id }}" ./*.zip \
             --title "欧加真 6.1.118 SCTP-LXC 加速版" \
-            --notes "包含 LXC/Docker 补丁与完整环境支持\n- 修复 SCTP 源码缺失问题（改用 git clone）\n- 优化补丁应用流程\n- 手动激进清理磁盘空间"
+            --notes "包含 LXC/Docker 补丁与完整环境支持\n- 修复 SCTP 源码缺失问题（改用 git clone）\n- 优化补丁应用流程\n- 使用 Action 高效清理磁盘空间"
