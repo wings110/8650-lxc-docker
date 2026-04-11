@@ -233,7 +233,7 @@ jobs:
             chmod +x ./sctp_source_fix_safe.sh
             # 脚本需要进入 common 目录执行
             cd common
-            bash ../sctp_source_fix_safe.sh
+            bash ./sctp_source_fix_safe.sh
           else
             echo "⚠️ 警告: sctp_source_fix_safe.sh 不存在"
           fi
@@ -355,7 +355,7 @@ jobs:
             # 回到工作区根目录
             cd ${{ env.WORKSPACE }}
           else
-            echo "⚠️ 警告: sctp_source_fix_safe.sh 不存在"
+            echo "⚠️ 警告: ../lxc_fix/lxc-patches/sctp_source_fix_safe.sh 不存在"
           fi
           
           # 写入 Config
