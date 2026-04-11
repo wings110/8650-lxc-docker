@@ -426,7 +426,7 @@ jobs:
           # ========== 6. 执行 SCTP 源码修复脚本 ==========
           echo "========== 6. 执行 SCTP 源码修复脚本 =========="
           cd ${{ env.WORKSPACE }}
-          SCRIPT_PATH="./lxc_fix/lxc-patches/sctp_source_fix.sh"
+          SCRIPT_PATH="./lxc-patches/sctp_source_fix.sh"
           
           if [ -f "$SCRIPT_PATH" ]; then
              echo "找到脚本，正在执行..."
