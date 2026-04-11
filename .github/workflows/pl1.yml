@@ -212,49 +212,38 @@ jobs:
           echo "========================================="
           cd ${{ env.WORKSPACE }}
           
+          # 克隆补丁仓库
           git clone --depth=1 https://github.com/wings110/8650-lxc-docker.git lxc_fix
           
-          # 应用所有 .patch 文件
-          for p in ./lxc_fix/lxc-patches/*.patch; do
-            echo "-> 应用补丁: $p"
-            patch -p1 -F 3 < "$p" || true
+          # 将 lxc-patches 里的所有文件移动到根目录
+          echo "正在移动补丁文件到根目录..."
+          mv lxc_fix/lxc-patches/* ./
+          
+          # 应用所有 .patch 文件（现在在工作区根目录）
+          for p in ./*.patch; do
+            if [ -f "$p" ]; then
+              echo "-> 应用补丁: $p"
+              patch -p1 -F 3 < "$p" || true
+            fi
           done
           
-          # 创建安全的 sctp 修复脚本（注意：已经在 common 目录内执行，不需要再 cd common）
-          cat > lxc_fix/lxc-patches/sctp_source_fix_safe.sh << 'SCRIPT_EOF'
-          #!/bin/bash
-          echo ">>> 正在外科手术式修复 SCTP 核心源码引用（安全模式）..."
-          
-          # 检查 SCTP 源码目录（已经在 common 目录内）
-          if [ ! -d "net/sctp" ]; then
-              echo "⚠️ 警告: net/sctp 源码目录不存在，跳过 SCTP 源码修复"
-              exit 0
+          # 执行 SCTP 修复脚本（现在在工作区根目录）
+          if [ -f "./sctp_source_fix_safe.sh" ]; then
+            echo "-> 执行 SCTP 修复脚本"
+            chmod +x ./sctp_source_fix_safe.sh
+            # 脚本需要进入 common 目录执行
+            cd common
+            bash ../sctp_source_fix_safe.sh
+          else
+            echo "⚠️ 警告: sctp_source_fix_safe.sh 不存在"
           fi
-          
-          if [ ! -d "include/net/sctp" ]; then
-              echo "⚠️ 警告: include/net/sctp 头文件目录不存在"
-          fi
-          
-          echo "✅ 找到 SCTP 源码，应用 ABI 兼容性修复..."
-          
-          # 修复所有 .c 文件中的指针引用
-          find net/sctp -name "*.c" -exec sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' {} \;
-          
-          # 修复头文件
-          if [ -f "include/net/sctp/structs.h" ]; then
-              sed -i 's/struct netns_sctp \*sctp;/struct netns_sctp sctp;/g' include/net/sctp/structs.h 2>/dev/null || true
-          fi
-          
-          echo "✅ SCTP 修复完成"
-          SCRIPT_EOF
-          chmod +x lxc_fix/lxc-patches/sctp_source_fix_safe.sh
-          
-          # 执行脚本（当前已经在 common 目录）
-          bash ../lxc_fix/lxc-patches/sctp_source_fix_safe.sh
           
           echo "========================================="
           echo ">>> 阶段 3/4：【补丁模式】提取结构体 (应用补丁后)"
           echo "========================================="
+          
+          # 回到 common 目录（如果不在的话）
+          cd ${{ env.WORKSPACE }}/common
           
           # 3.1 补丁模式：SCTP OFF
           echo ">>> 3.1 正在编译 补丁组 (SCTP OFF)..."
@@ -344,29 +333,30 @@ jobs:
             git clone --depth=1 https://github.com/wings110/8650-lxc-docker.git lxc_fix
           fi
           
-          # 应用补丁
-          for p in ./lxc_fix/lxc-patches/*.patch; do
-            echo "-> 应用补丁: $p"
-            patch -p1 -F 3 < "$p" || true
+          # 将 lxc-patches 里的所有文件移动到根目录
+          echo "正在移动补丁文件到根目录..."
+          mv lxc_fix/lxc-patches/* ./
+          
+          # 应用所有 .patch 文件
+          for p in ./*.patch; do
+            if [ -f "$p" ]; then
+              echo "-> 应用补丁: $p"
+              patch -p1 -F 3 < "$p" || true
+            fi
           done
           
-          # 创建安全修复脚本（注意：已经在 common 目录内执行，不需要再 cd common）
-          cat > lxc_fix/lxc-patches/sctp_source_fix_safe.sh << 'SCRIPT_EOF'
-          #!/bin/bash
-          echo ">>> SCTP 源码安全修复..."
-          # 已经在 common 目录内
-          if [ -d "net/sctp" ] && [ -f "net/sctp/sysctl.c" ]; then
-              find net/sctp -name "*.c" -exec sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' {} \;
-              echo "✅ SCTP 修复应用"
+          # 执行 SCTP 修复脚本
+          if [ -f "./sctp_source_fix_safe.sh" ]; then
+            echo "-> 执行 SCTP 修复脚本"
+            chmod +x ./sctp_source_fix_safe.sh
+            # 进入 common 目录执行脚本
+            cd common
+            bash ../sctp_source_fix_safe.sh
+            # 回到工作区根目录
+            cd ${{ env.WORKSPACE }}
           else
-              echo "⚠️ 跳过 SCTP 修复（源码不存在）"
+            echo "⚠️ 警告: sctp_source_fix_safe.sh 不存在"
           fi
-          SCRIPT_EOF
-          chmod +x lxc_fix/lxc-patches/sctp_source_fix_safe.sh
-          
-          # 进入 common 目录并执行脚本
-          cd common
-          bash ../lxc_fix/lxc-patches/sctp_source_fix_safe.sh
           
           # 写入 Config
           {
@@ -376,7 +366,7 @@ jobs:
             fi
             echo "CONFIG_TMPFS_XATTR=y"
             echo "CONFIG_TMPFS_POSIX_ACL=y"
-          } >> arch/arm64/configs/gki_defconfig
+          } >> common/arch/arm64/configs/gki_defconfig
 
       - name: 构建内核镜像 (常规流)
         if: inputs.vmlinux_debug == false
@@ -428,4 +418,4 @@ jobs:
         run: |
           gh release create "Build-${{ github.run_id }}" ./*.zip \
             --title "欧加真 6.1.118 SCTP-LXC 加速版" \
-            --notes "包含 LXC/Docker 补丁与完整环境支持\n- 修复 SCTP 源码缺失问题（改用 git clone）\n- 优化补丁应用流程\n- 参考 fastbuild 配置优化磁盘清理策略"
+            --notes "包含 LXC/Docker 补丁与完整环境支持\n- 修复 SCTP 源码缺失问题（改用 git clone）\n- 优化补丁应用流程（补丁文件移至根目录）\n- 参考 fastbuild 配置优化磁盘清理策略"
