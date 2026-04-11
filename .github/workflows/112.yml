@@ -1,0 +1,272 @@
+name: 精准sctp-new加速版构建 6.1.118 欧加真OKI内核
+
+# 提升 env 变量至全局，确保 build 和 release 两个 job 都能读取到版本号
+env:
+  TZ: Asia/Shanghai
+  ANDROID_VERSION: 'android14'
+  KERNEL_VERSION: '6.1'
+  SUB_VERSION: '118'
+  KERNEL_NAME: 'android14-11-o-gca13bffobf09'
+  CCACHE_KEY: ccache-lxc-6.1.118
+
+on:
+  workflow_dispatch:
+    inputs:
+      ksu_type:
+        description: 'KernelSU分支(ReSukiSU/SukiSU Ultra/KernelSU Next/KSU(原版)/无内置KSU,默认ReSukiSU)'
+        required: true
+        type: choice
+        default: 'resukisu'
+        options:
+          - 'resukisu'
+          - 'sukisu'
+          - 'ksunext'
+          - 'ksu'
+          - 'none'
+      vmlinux_debug:
+        description: '【云端 ABI 排雷】仅编译并使用 pahole 提取结构体差异报告 (跳过普通刷机包打包)'
+        required: true
+        type: boolean
+        default: false
+      susfs_enable:
+        description: '是否开启susfs(用于增强隐藏环境挂载功能)'
+        required: true
+        type: boolean
+        default: true
+      kpm_enable:
+        description: '是否开启kpm(builtin/kpn/false)'
+        required: true
+        type: choice
+        default: 'false'
+        options:
+          - 'false'
+          - 'builtin'
+          - 'kpn'
+      lz4_enable:
+        description: '是否安装 lz4 1.10.0+zstd 1.5.7 补丁'
+        required: true
+        type: boolean
+        default: true
+      lz4kd_enable:
+        description: '是否安装 LZ4KD 补丁'
+        required: true
+        type: boolean
+        default: false
+      better_net:
+        description: '是否开启网络功能拓展配置 (包括 SCTP)'
+        required: true
+        type: boolean
+        default: false
+      bbr_enable:
+        description: '是否启用bbr算法'
+        required: true
+        type: choice
+        default: 'false'
+        options:
+          - 'false'
+          - 'true'
+          - 'default'
+      ssg_enable:
+        description: '是否启用三星SSG IO调度器'
+        required: true
+        type: boolean
+        default: true
+      rekernel_enable:
+        description: '是否启用Re-Kernel支持'
+        required: true
+        type: boolean
+        default: false
+      baseband_guard:
+        description: '是否开启内核级基带保护'
+        required: true
+        type: boolean
+        default: true
+      ccache_update:
+        description: '更新ccache缓存'
+        required: true
+        type: boolean
+        default: false
+      ccache_debug:
+        description: '是否上传 Ccache调试日志'
+        required: true
+        type: boolean
+        default: false
+      kernel_suffix:
+        description: '内核后缀(留空默认)'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      ksuver: ${{ steps.ksu_version.outputs.ksuver }}
+      ak3name: ${{ steps.create_zip.outputs.ak3name }}
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: 释放磁盘空间
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-docker-images: 'true'
+
+      - name: 安装环境依赖+初始化源码
+        run: |
+          mkdir kernel_workspace && cd kernel_workspace
+          sudo apt update && sudo apt install -y --no-install-recommends binutils python-is-python3 libssl-dev libelf-dev zstd dwarves zip pkg-config aria2
+          
+          # 并行克隆
+          aria2c -s16 -x16 https://github.com/cctv18/android_kernel_common_oneplus_sm8650/archive/refs/heads/oneplus/sm8650_b_16.0.0_oneplus12.zip -o common.zip &
+          aria2c -s16 -x16 https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang20-r547379/clang-r547379.zip -o clang.zip &
+          aria2c -s16 -x16 https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang20-r547379/build-tools.zip -o build-tools.zip &
+          wait
+          
+          unzip -q common.zip && mv android_kernel_common_oneplus_sm8650-* common
+          mkdir -p clang20 && unzip -q clang.zip -d clang20
+          unzip -q build-tools.zip
+          rm -f *.zip
+          
+          # 去除 ABI 保护
+          rm common/android/abi_gki_protected_exports_* || true
+          sed -i 's/ -dirty//g' common/scripts/setlocalversion
+
+      - name: 配置ccache
+        run: |
+          echo "CCACHE_DIR=$HOME/.ccache_${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}" >> $GITHUB_ENV
+          echo "CCACHE_MAXSIZE=5G" >> $GITHUB_ENV
+
+      - name: 载入 ccache 缓存
+        uses: actions/cache@v5
+        id: ccache-restore
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ env.CCACHE_KEY }}-${{ runner.os }}-${{ github.ref_name }}
+          restore-keys: |
+            ${{ env.CCACHE_KEY }}-${{ runner.os }}-
+
+      - name: 安装 ccache
+        run: sudo apt-get install -y ccache
+
+      - name: 添加KernelSU
+        id: ksu_version
+        run: |
+          cd kernel_workspace
+          if [[ ${{ github.event.inputs.ksu_type }} == "sukisu" ]]; then
+            curl -LSs "https://raw.githubusercontent.com/ShirkNeko/SukiSU-Ultra/refs/heads/main/kernel/setup.sh" | bash -s builtin
+            echo "ksuver=SukiSU" >> $GITHUB_OUTPUT
+          elif [[ ${{ github.event.inputs.ksu_type }} == "resukisu" ]]; then
+            curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/refs/heads/main/kernel/setup.sh" | bash -s main
+            echo "ksuver=ReSukiSU" >> $GITHUB_OUTPUT
+          elif [[ ${{ github.event.inputs.ksu_type }} == "ksunext" ]]; then
+            curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
+            echo "ksuver=Next" >> $GITHUB_OUTPUT
+          elif [[ ${{ github.event.inputs.ksu_type }} == "ksu" ]]; then
+            curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main
+            echo "ksuver=Official" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 应用 SUSFS 补丁
+        if: inputs.susfs_enable && github.event.inputs.ksu_type != 'none'
+        run: |
+          cd kernel_workspace
+          git clone --depth=1 https://github.com/cctv18/susfs4oki.git susfs4ksu -b oki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}
+          cd common
+          patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch || true
+
+      - name: 应用网络与算法配置
+        run: |
+          cd kernel_workspace/common
+          # 开启 SCTP
+          if [[ "${{ github.event.inputs.better_net }}" == "true" ]]; then
+             echo "CONFIG_IP_SCTP=y" >> arch/arm64/configs/gki_defconfig
+          fi
+          # 开启 BBR
+          if [[ "${{ github.event.inputs.bbr_enable }}" != "false" ]]; then
+             echo "CONFIG_TCP_CONG_BBR=y" >> arch/arm64/configs/gki_defconfig
+             [[ "${{ github.event.inputs.bbr_enable }}" == "default" ]] && echo "CONFIG_DEFAULT_TCP_CONG=bbr" >> arch/arm64/configs/gki_defconfig
+          fi
+
+      - name: 【排雷模式】极速提取报告
+        if: inputs.vmlinux_debug == true
+        run: |
+          WORKDIR="$(pwd)"
+          export PATH="/usr/lib/ccache:$WORKDIR/kernel_workspace/clang20/bin:$WORKDIR/kernel_workspace/build-tools/bin:$PATH"
+          cd kernel_workspace/common
+          MAKE_CMD="make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang O=out"
+          
+          # 对照组: 关闭 SCTP
+          sed -i '/CONFIG_IP_SCTP/d' arch/arm64/configs/gki_defconfig
+          echo "# CONFIG_IP_SCTP is not set" >> arch/arm64/configs/gki_defconfig
+          $MAKE_CMD gki_defconfig && $MAKE_CMD net/core/net_namespace.o
+          pahole -C net out/net/core/net_namespace.o > ../net_off.txt
+          
+          # 实验组: 开启 SCTP
+          echo "CONFIG_IP_SCTP=y" >> arch/arm64/configs/gki_defconfig
+          $MAKE_CMD gki_defconfig && $MAKE_CMD net/core/net_namespace.o
+          pahole -C net out/net/core/net_namespace.o > ../net_on.txt
+          
+          cd ..
+          diff -u net_off.txt net_on.txt > abi_diff_report.txt || true
+          zip abi_reports.zip net_off.txt net_on.txt abi_diff_report.txt
+
+      - name: 上传排雷报告
+        if: inputs.vmlinux_debug == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: abi_analysis_reports
+          path: kernel_workspace/abi_reports.zip
+
+      - name: 构建内核 (刷机包模式)
+        if: inputs.vmlinux_debug == false
+        run: |
+          WORKDIR="$(pwd)"
+          export PATH="/usr/lib/ccache:$WORKDIR/kernel_workspace/clang20/bin:$WORKDIR/kernel_workspace/build-tools/bin:$PATH"
+          export C_INCLUDE_PATH="/usr/include:/usr/include/x86_64-linux-gnu"
+          cd kernel_workspace/common
+          make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" O=out gki_defconfig
+          make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" O=out Image
+
+      - name: 打包 AnyKernel3
+        id: create_zip
+        if: inputs.vmlinux_debug == false
+        run: |
+          cd kernel_workspace
+          git clone --depth=1 https://github.com/cctv18/AnyKernel3
+          cp common/out/arch/arm64/boot/Image AnyKernel3/
+          cd AnyKernel3
+          AK3_NAME="AnyKernel3_${{ github.event.inputs.ksu_type }}_${{ env.KERNEL_VERSION }}.zip"
+          zip -r ../$AK3_NAME ./*
+          echo "ak3name=$AK3_NAME" >> $GITHUB_OUTPUT
+
+      - name: 上传刷机包
+        if: inputs.vmlinux_debug == false
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-zip
+          path: kernel_workspace/AnyKernel3*.zip
+
+  release:
+    needs: build
+    if: inputs.vmlinux_debug == false && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 下载工件
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-zip
+          path: ./
+      
+      - name: 发布 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="Build-${{ env.KERNEL_VERSION }}-${{ github.run_id }}"
+          gh release create "$TAG" ./*.zip --title "欧加真内核 ${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}" --notes "基于 OKI 源码构建"
