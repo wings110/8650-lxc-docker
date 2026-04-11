@@ -1,4 +1,4 @@
-name: sctp-new加速版构建 6.1.118 欧加真OKI内核
+name: 12123sctp-new加速版构建 6.1.118 欧加真OKI内核
 
 env:
   TZ: Asia/Shanghai
@@ -107,22 +107,20 @@ jobs:
       actions: write
       contents: read
     steps:
-      - name: 终极磁盘空间清理 (释放超 30GB 空间)
+      - name: 清理磁盘空间 (参考fastbuild配置)
         run: |
-          echo "========== 开始极致清理系统无用依赖 =========="
-          # 删除极其占空间的预装环境，为庞大的内核编译和 Ccache 腾出绝对充足的空间
+          echo "========== 开始清理系统无用依赖 =========="
+          sudo apt-mark hold firefox || true
+          sudo apt-mark hold libc-bin || true
+          sudo apt purge -y man-db || true
+          sudo rm -rf /var/lib/man-db/auto-update
+          
+          # 清除占用空间极大的预置环境
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
           sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo rm -rf /usr/lib/jvm
-          sudo rm -rf /usr/share/swift
-          sudo rm -rf /usr/local/.ghcup
-          sudo rm -rf /usr/local/share/powershell
-          sudo rm -rf /usr/local/share/chromium
-          # 清理 apt 缓存与 Docker 镜像
-          sudo apt-get clean
-          sudo docker image prune --all --force
+          
           echo "========== 磁盘空间清理完成 =========="
           df -h
 
@@ -138,7 +136,7 @@ jobs:
           echo "========== 当前磁盘空间检查 =========="
           df -h
           
-          # 使用 git clone 获取完整内核源码
+          # 使用 git clone 获取完整内核源码（确保不丢失任何目录）
           echo "正在使用 git clone 克隆内核源码..."
           git clone --depth 1 --branch oneplus/sm8650_b_16.0.0_oneplus12 \
             https://github.com/cctv18/android_kernel_common_oneplus_sm8650.git common
@@ -160,318 +158,111 @@ jobs:
           echo "========== 源码准备完成 =========="
           ls -la common/ | head -20
           
+          # ========== 关键验证：确认 SCTP 目录存在 ==========
           echo "========== 验证 SCTP 目录 =========="
           if [ -d "common/net/sctp" ]; then
             echo "✅ 验证成功：common/net/sctp 目录存在！"
+            ls -la common/net/sctp/ | head -10
           else
             echo "❌ 错误：common/net/sctp 目录不存在"
+            echo "正在查找 sctp 目录位置..."
+            find common -type d -name "sctp" 2>/dev/null
             exit 1
           fi
-
-      - name: 配置ccache目录
-        run: |
-          echo "CCACHE_DIR=$HOME/.ccache_${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}" >> $GITHUB_ENV
-          echo "CCACHE_MAXSIZE=5G" >> $GITHUB_ENV
-
-      - name: 载入当前版本内核的 ccache缓存
-        uses: actions/cache@v5
-        id: ccache-restore
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ${{ env.CCACHE_KEY }}-${{ runner.os }}-${{ github.ref_name }}
-          restore-keys: |
-            ${{ env.CCACHE_KEY }}-${{ runner.os }}-
-
-      - name: 拉取公共预置 ccache 缓存
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "检查本地缓存状态..."
-          if [ -d "${{ env.CCACHE_DIR }}" ] && [ "$(ls -A ${{ env.CCACHE_DIR }} 2>/dev/null)" ]; then
-            echo "检测到本地已成功载入 ccache 缓存，跳过公共 ccache 拉取！"
-            exit 0
-          fi
-          mkdir -p ${{ env.CCACHE_DIR }}
-          FILE_NAME="ccache-${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}.tar.zst"
-          if gh release download -p "$FILE_NAME" -R cctv18/public_ccache; then
-            tar -I zstd -xf "$FILE_NAME" -C ${{ env.CCACHE_DIR }}
-          fi
-
-      - name: 清除旧 ccache 缓存
-        if: inputs.ccache_update
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh cache delete ${{ env.CCACHE_KEY }}-${{ runner.os }}-${{ github.ref_name }} -R ${{ github.repository }} || true
-      
-      - name: 初始化并配置ccache
-        run: |
-          export CCACHE_COMPILERCHECK="none"
-          export CCACHE_BASEDIR="${{ github.workspace }}"
-          export CCACHE_NOHASHDIR="true"
-          export CCACHE_HARDLINK="true"
-          export CCACHE_DIR="${{ env.CCACHE_DIR }}"
-          export CCACHE_MAXSIZE="${{ env.CCACHE_MAXSIZE }}"
-          mkdir -p "$CCACHE_DIR" && chmod -R 777 "$CCACHE_DIR" || true
-          rm -f "$CCACHE_DIR/ccache.conf"
-          ccache -M "$CCACHE_MAXSIZE"
-          ccache -o compression=true
-
-      # ================== 核心配置阶段 ==================
-      - name: 添加KernelSU
-        id: ksu_version
-        run: |
-          cd ${{ env.WORKSPACE }}
-          if [[ ${{ github.event.inputs.ksu_type }} == "sukisu" ]]; then
-            echo "正在配置SukiSU Ultra..."
-            curl -LSs "https://raw.githubusercontent.com/ShirkNeko/SukiSU-Ultra/refs/heads/main/kernel/setup.sh" | bash -s builtin
-            cd ./KernelSU
-            GIT_COMMIT_HASH=$(git rev-parse --short=8 HEAD)
-            export KSU_VERSION=$KSU_VERSION
-            for i in {1..3}; do
-              KSU_API_VERSION=$(curl -s "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/builtin/kernel/Kbuild" | grep -m1 "KSU_VERSION_API :=" | awk -F'= ' '{print $2}' | tr -d '[:space:]')
-              [ -n "$KSU_API_VERSION" ] && break || sleep 1
-            done
-            [ -z "$KSU_API_VERSION" ] && KSU_API_VERSION="3.1.7"
-            echo "KSU_API_VERSION=$KSU_API_VERSION" >> $GITHUB_ENV
-            VERSION_DEFINITIONS=$'define get_ksu_version_full\nv\\$1-'"$GIT_COMMIT_HASH"$'@wings110\nendef\n\nKSU_VERSION_API := '"$KSU_API_VERSION"$'\nKSU_VERSION_FULL := v'"$KSU_API_VERSION"$'-'"$GIT_COMMIT_HASH"$'@wings110'
-            sed -i '/define get_ksu_version_full/,/endef/d' kernel/Kbuild
-            sed -i '/KSU_VERSION_API :=/d' kernel/Kbuild
-            sed -i '/KSU_VERSION_FULL :=/d' kernel/Kbuild
-            awk -v def="$VERSION_DEFINITIONS" '/REPO_OWNER :=/ {print; print def; inserted=1; next} 1 END {if (!inserted) print def}' kernel/Kbuild > kernel/Kbuild.tmp && mv kernel/Kbuild.tmp kernel/Kbuild
-            KSU_VERSION=$(expr $(git rev-list --count main) + 37185 2>/dev/null || echo 114514)
-            echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
-            echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
-          elif [[ ${{ github.event.inputs.ksu_type }} == "resukisu" ]]; then
-            echo "正在配置ReSukiSU..."
-            curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/refs/heads/main/kernel/setup.sh" | bash -s main
-            echo 'CONFIG_KSU_FULL_NAME_FORMAT="%TAG_NAME%-%COMMIT_SHA%@wings110"' >> ./common/arch/arm64/configs/gki_defconfig
-            cd ./KernelSU
-            KSU_VERSION=$(expr $(git rev-list --count main) + 30700 2>/dev/null || echo 114514)
-            echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
-            echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
-          elif [[ ${{ github.event.inputs.ksu_type }} == "ksunext" ]]; then
-            echo "正在配置KernelSU Next..."
-            curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
-            cd KernelSU-Next
-            rm -rf .git
-            KSU_VERSION=$(expr $(curl -sI "https://api.github.com/repos/pershoot/KernelSU-Next/commits?sha=dev&per_page=1" | grep -i "link:" | sed -n 's/.*page=\([0-9]*\)>; rel="last".*/\1/p') "+" 30000)
-            echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
-            echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
-            sed -i "s/KSU_VERSION_FALLBACK := 1/KSU_VERSION_FALLBACK := $KSU_VERSION/g" kernel/Kbuild
-            KSU_GIT_TAG=$(curl -sL "https://api.github.com/repos/KernelSU-Next/KernelSU-Next/tags" | grep -o '"name": *"[^"]*"' | head -n 1 | sed 's/"name": "//;s/"//')
-            sed -i "s/KSU_VERSION_TAG_FALLBACK := v0.0.1/KSU_VERSION_TAG_FALLBACK := $KSU_GIT_TAG/g" kernel/Kbuild
-            cd ../common/drivers/kernelsu
-            wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/other_patch/apk_sign.patch
-            patch -p2 -N -F 3 < apk_sign.patch || true
-          elif [[ ${{ github.event.inputs.ksu_type }} == "ksu" ]]; then
-            echo "正在配置原版 KernelSU..."
-            curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main
-            cd ./KernelSU
-            KSU_VERSION=$(expr $(curl -sI "https://api.github.com/repos/tiann/KernelSU/commits?sha=main&per_page=1" | grep -i "link:" | sed -n 's/.*page=\([0-9]*\)>; rel="last".*/\1/p') "+" 30000)
-            echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
-            echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
-            sed -i "s/DKSU_VERSION=16/DKSU_VERSION=${KSU_VERSION}/" kernel/Kbuild
+          
+          if [ -d "common/include/net/sctp" ]; then
+            echo "✅ 验证成功：common/include/net/sctp 目录存在！"
           else
-            echo "已选择无内置KernelSU模式，跳过KernelSU配置..."
+            echo "⚠️ 警告：common/include/net/sctp 目录不存在"
           fi
 
-      - name: 应用 KernelSU & SUSFS 补丁
-        if: inputs.susfs_enable
+      # ================== 核心升级：控制变量法 2x2 正交排雷 ==================
+      - name: 【云端 ABI 排雷】纯净组与补丁组双向对比
+        if: inputs.vmlinux_debug == true
         run: |
           cd ${{ env.WORKSPACE }}
-          if [[ ${{ github.event.inputs.ksu_type }} != "none" ]]; then
-            echo "正在添加susfs补丁..."
-            git clone --depth=1 https://github.com/cctv18/susfs4oki.git susfs4ksu -b oki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}
-            wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/other_patch/69_hide_stuff.patch -O ./common/69_hide_stuff.patch
-            cp ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch ./common/
-            cp ./susfs4ksu/kernel_patches/fs/* ./common/fs/
-            cp ./susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
-            cd ./common
-            patch -p1 < 50_add_susfs_in_gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch || true
-            patch -p1 -N -F 3 < 69_hide_stuff.patch || true
-            cd ..
-          fi
-          if [[ ${{ github.event.inputs.ksu_type }} == "ksu" ]]; then
-            echo "正在为原版 KernelSU 添加补丁..."
-            cp ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./KernelSU/
-            cd ./KernelSU
-            patch -p1 < 10_enable_susfs_for_ksu.patch || true
-          fi
+          export PATH="/usr/lib/ccache:$PWD/clang20/bin:$PWD/build-tools/bin:$PATH"
+          export C_INCLUDE_PATH="/usr/include:/usr/include/x86_64-linux-gnu"
           
-      - name: 应用lz4 1.10.0 & zstd 1.5.7补丁
-        if: inputs.lz4_enable
-        run: |
-          echo "正在添加lz4 1.10.0 & zstd 1.5.7补丁…"
-          cd ${{ env.WORKSPACE }}
-          git clone --depth=1 https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git -b ${{ github.ref_name }} ${{ github.actor }}
-          cp ./${{ github.actor }}/zram_patch/001-lz4.patch ./common/
-          cp ./${{ github.actor }}/zram_patch/lz4armv8.S ./common/lib
-          cp ./${{ github.actor }}/zram_patch/002-zstd.patch ./common/
-          cd ./common
-          git apply -p1 < 001-lz4.patch || true
-          patch -p1 < 002-zstd.patch || true
-
-      - name: 应用 lz4kd 补丁
-        if: inputs.lz4kd_enable
-        run: |
-          echo "正在添加lz4kd补丁…"
-          cd ${{ env.WORKSPACE }}
-          if [ ! -d "SukiSU_patch" ]; then
-            git clone --depth=1 https://github.com/ShirkNeko/SukiSU_patch.git
-          fi
+          MAKE_CMD="make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang O=out"
+          
+          echo "========================================="
+          echo ">>> 阶段 1/4：【纯净模式】提取结构体 (不打任何补丁)"
+          echo "========================================="
           cd common
-          cp -r ../SukiSU_patch/other/zram/lz4k/include/linux/* ./include/linux/
-          cp -r ../SukiSU_patch/other/zram/lz4k/lib/* ./lib
-          cp -r ../SukiSU_patch/other/zram/lz4k/crypto/* ./crypto
-          cp ../SukiSU_patch/other/zram/zram_patch/${{ env.KERNEL_VERSION }}/lz4kd.patch ./
-          patch -p1 -F 3 < lz4kd.patch || true
           
-      - name: 添加SUSFS 配置项
-        if: inputs.susfs_enable
-        run: |
-          cd ${{ env.WORKSPACE }}
-          echo "CONFIG_KSU_SUSFS=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SUS_MAP=y" >> ./common/arch/arm64/configs/gki_defconfig
+          # 1.1 纯净模式：SCTP OFF
+          echo ">>> 1.1 正在编译 纯净组 (SCTP OFF)..."
+          sed -i '/CONFIG_IP_SCTP/d' arch/arm64/configs/gki_defconfig
+          echo "# CONFIG_IP_SCTP is not set" >> arch/arm64/configs/gki_defconfig
+          $MAKE_CMD gki_defconfig && $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
+          pahole -C net out/net/core/net_namespace.o > ../net_clean_sctp_off.txt
+          pahole -C sk_buff out/net/core/skbuff.o > ../skb_clean_sctp_off.txt
           
-      - name: 添加 KSU & 其他配置项
-        run: |
-          cd ${{ env.WORKSPACE }}
-          echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/gki_defconfig
-          if [[ ${{ github.event.inputs.kpm_enable }} == 'builtin' && ( "${{ github.event.inputs.ksu_type }}" == "sukisu" || "${{ github.event.inputs.ksu_type }}" == "resukisu" ) ]]; then
-            echo "CONFIG_KPM=y" >> ./common/arch/arm64/configs/gki_defconfig
-          fi
-          if [[ "${{ github.event.inputs.susfs_enable }}" == "false" ]]; then
-            echo "CONFIG_KSU_SUSFS=n" >> ./common/arch/arm64/configs/gki_defconfig
-          fi
-          echo "CONFIG_TMPFS_XATTR=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_TMPFS_POSIX_ACL=y" >> ./common/arch/arm64/configs/gki_defconfig
-          if [[ ${{ github.event.inputs.lz4kd_enable }} == 'true' ]]; then
-            echo "CONFIG_ZSMALLOC=y" >> ./common/arch/arm64/configs/gki_defconfig
-            echo "CONFIG_CRYPTO_LZ4HC=y" >> ./common/arch/arm64/configs/gki_defconfig
-            echo "CONFIG_CRYPTO_LZ4K=y" >> ./common/arch/arm64/configs/gki_defconfig
-            echo "CONFIG_CRYPTO_LZ4KD=y" >> ./common/arch/arm64/configs/gki_defconfig
-            echo "CONFIG_CRYPTO_842=y" >> ./common/arch/arm64/configs/gki_defconfig
-          fi
-          echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" >> ./common/arch/arm64/configs/gki_defconfig
-          sed -i 's/check_defconfig//' ./common/build.config.gki
-          echo "CONFIG_HEADERS_INSTALL=n" >> ./common/arch/arm64/configs/gki_defconfig
+          # 1.2 纯净模式：SCTP ON
+          echo ">>> 1.2 正在编译 纯净组 (SCTP ON)..."
+          sed -i '/CONFIG_IP_SCTP/d' arch/arm64/configs/gki_defconfig
+          echo "CONFIG_IP_SCTP=y" >> arch/arm64/configs/gki_defconfig
+          $MAKE_CMD gki_defconfig && $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
+          pahole -C net out/net/core/net_namespace.o > ../net_clean_sctp_on.txt
+          pahole -C sk_buff out/net/core/skbuff.o > ../skb_clean_sctp_on.txt
           
-      - name: 启用网络功能增强优化配置 (并开启 SCTP 功能)
-        if: inputs.better_net
-        run: |
-          cd ${{ env.WORKSPACE }}
-          echo "CONFIG_BPF_STREAM_PARSER=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NETFILTER_XT_SET=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_MAX=65534" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_BITMAP_IP=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_BITMAP_IPMAC=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_BITMAP_PORT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_IP=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_IPMARK=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_IPPORT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_IPPORTIP=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_IPPORTNET=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_IPMAC=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_MAC=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_NETPORTNET=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_NET=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_NETNET=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_NETPORT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_HASH_NETIFACE=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SET_LIST_SET=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP6_NF_NAT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP6_NF_TARGET_MASQUERADE=y" >> ./common/arch/arm64/configs/gki_defconfig
-          # 正式开启 SCTP 编译
-          echo "CONFIG_IP_SCTP=y" >> ./common/arch/arm64/configs/gki_defconfig
-          cd common
-          wget --header="Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/other_patch/config.patch
-          patch -p1 -F 3 < config.patch || true
-
-      - name: 添加 BBR 等一系列拥塞控制算法
-        run: |
-          if [[ "${{ github.event.inputs.bbr_enable }}" != "false" ]]; then
-            echo "正在添加BBR等拥塞控制算法..."
-            cd ${{ env.WORKSPACE }}
-            echo "CONFIG_TCP_CONG_ADVANCED=y" >> ./common/arch/arm64/configs/gki_defconfig
-            echo "CONFIG_TCP_CONG_BBR=y" >> ./common/arch/arm64/configs/gki_defconfig
-            echo "CONFIG_TCP_CONG_CUBIC=y" >> ./common/arch/arm64/configs/gki_defconfig
-            echo "CONFIG_TCP_CONG_VEGAS=y" >> ./common/arch/arm64/configs/gki_defconfig
-            echo "CONFIG_TCP_CONG_NV=y" >> ./common/arch/arm64/configs/gki_defconfig
-            echo "CONFIG_TCP_CONG_WESTWOOD=y" >> ./common/arch/arm64/configs/gki_defconfig
-            echo "CONFIG_TCP_CONG_HTCP=y" >> ./common/arch/arm64/configs/gki_defconfig
-            echo "CONFIG_TCP_CONG_BRUTAL=y" >> ./common/arch/arm64/configs/gki_defconfig
-            if [[ "${{ github.event.inputs.bbr_enable }}" == "default" ]]; then
-              echo "CONFIG_DEFAULT_TCP_CONG=bbr" >> ./common/arch/arm64/configs/gki_defconfig
-            else
-              echo "CONFIG_DEFAULT_TCP_CONG=cubic" >> ./common/arch/arm64/configs/gki_defconfig
-            fi
-          fi
-
-      - name: 启用三星SSG IO调度器
-        if: inputs.ssg_enable
-        run: |
-          echo "正在启用三星SSG IO调度器..."
-          cd ${{ env.WORKSPACE }}
-          echo "CONFIG_MQ_IOSCHED_SSG=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_MQ_IOSCHED_SSG_CGROUP=y" >> ./common/arch/arm64/configs/gki_defconfig
-
-      - name: 启用Re-Kernel支持
-        if: inputs.rekernel_enable
-        run: |
-          echo "正在启用Re-Kernel支持..."
-          cd ${{ env.WORKSPACE }}
-          echo "CONFIG_REKERNEL=y" >> ./common/arch/arm64/configs/gki_defconfig
-
-      - name: 启用内核级基带保护
-        if: inputs.baseband_guard
-        run: |
-          echo "正在启用启用内核级基带保护支持…"
-          cd ${{ env.WORKSPACE }}/common
-          curl -sSL https://github.com/cctv18/Baseband-guard/raw/master/setup.sh | bash
-          sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
-
-      - name: 配置支持lxc-docker任务 (应用补丁与修复脚本)
-        run: |
-          echo "正在配置支持lxc-docker任务…"
+          echo "========================================="
+          echo ">>> 阶段 2/4：【应用补丁】打入 LXC/Docker 修复"
+          echo "========================================="
           cd ${{ env.WORKSPACE }}
           
-          # 克隆补丁仓库
-          if [ ! -d "lxc_fix" ]; then
-            git clone --depth=1 https://github.com/wings110/8650-lxc-docker.git lxc_fix
-          fi
+          echo "========== 克隆补丁仓库 =========="
+          git clone --depth=1 https://github.com/wings110/8650-lxc-docker.git lxc_fix
           
-          # 将补丁移动到工作区根目录
+          # 将 lxc-patches 里的所有文件移动到根目录
+          echo "正在移动补丁文件到根目录..."
           if [ -d "lxc_fix/lxc-patches" ]; then
             mv lxc_fix/lxc-patches/* ./ 2>/dev/null || true
+            echo "移动完成"
           fi
           
-          echo "========== 应用 LXC/Docker 补丁 =========="
-          for patch_file in ./*.patch; do
-            if [ -f "$patch_file" ]; then
-              echo "正在应用补丁: $patch_file"
-              sed -i 's/\r$//' "$patch_file"
-              patch -p1 -F 3 < "$patch_file" || true
+          # 应用所有 .patch 文件
+          echo "========== 应用补丁 =========="
+          for p in ./*.patch; do
+            if [ -f "$p" ]; then
+              echo "-> 应用补丁: $p"
+              patch -p1 -F 3 < "$p" || true
             fi
           done
           
+          # ========== 验证 SCTP ABI 补丁是否生效 ==========
+          echo "========== 验证 SCTP ABI 补丁 =========="
+          cd common
+          
+          # 检查 net_namespace.h 是否被修改
+          if grep -q "net_sctp" include/net/net_namespace.h; then
+            echo "✅ net_namespace.h 已包含 net_sctp 宏"
+          else
+            echo "❌ net_namespace.h 未正确修改"
+          fi
+          
+          # 检查 struct net 中是否还有 sctp 字段
+          if grep -q "struct netns_sctp" include/net/net_namespace.h | grep -v "net_ext"; then
+            echo "❌ struct net 中仍然有 sctp 字段"
+          else
+            echo "✅ struct net 中已无 sctp 字段"
+          fi
+          
+          # 检查 net_ext 结构体是否包含 sctp
+          if grep -A10 "struct net_ext" include/net/net_namespace.h | grep -q "struct netns_sctp"; then
+            echo "✅ net_ext 中已包含 sctp 字段"
+          else
+            echo "⚠️ net_ext 中未找到 sctp 字段"
+          fi
+          
+          cd ${{ env.WORKSPACE }}
+          
+          # ========== 执行 SCTP 源码修复脚本 ==========
           echo "========== 执行 SCTP 源码修复脚本 =========="
+          cd ${{ env.WORKSPACE }}
           SCRIPT_PATH="./sctp_source_fix.sh"
+          
           if [ -f "$SCRIPT_PATH" ]; then
              echo "找到脚本，正在执行..."
              sed -i 's/\r$//' "$SCRIPT_PATH"
@@ -481,292 +272,237 @@ jobs:
              ls -la
              exit 1
           fi
-          echo "✅ LXC/Docker 环境与源码重构配置完成！"
-
-      - name: 添加制作名称
-        run: |
-          cd ${{ env.WORKSPACE }}
-          echo "替换内核版本后缀..."
-          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
-            for f in ./common/scripts/setlocalversion; do
-              sed -i "\$s|echo \"\\\$res\"|echo \"-${{ github.event.inputs.kernel_suffix }}\"|" "$f"
-            done
-          else
-            for f in ./common/scripts/setlocalversion; do
-              sed -i "\$s|echo \"\\\$res\"|echo \"-${{ env.KERNEL_NAME }}\"|" "$f"
-            done
-          fi
-
-      # ================== 核心升级：云端排雷模式 (2x2 Matrix) ==================
-      - name: 【云端 ABI 排雷】双向对比与提取
-        if: inputs.vmlinux_debug == true
-        run: |
-          cd ${{ env.WORKSPACE }}
-          export PATH="/usr/lib/ccache:$PWD/clang20/bin:$PWD/build-tools/bin:$PATH"
-          export CPATH="/usr/include:/usr/include/x86_64-linux-gnu"
-          export C_INCLUDE_PATH="/usr/include:/usr/include/x86_64-linux-gnu"
-          
-          # 核心修复：强行注入宿主机头文件，解决 libelf.h 找不到的报错
-          MAKE_CMD="make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang HOSTCFLAGS=\"-I/usr/include -I/usr/include/x86_64-linux-gnu\" HOSTLDFLAGS=\"-L/usr/lib/x86_64-linux-gnu\" O=out"
           
           echo "========================================="
-          echo ">>> 阶段：【纯净模式】提取结构体 (SCTP OFF/ON)"
+          echo ">>> 阶段 3/4：【补丁模式】提取结构体 (应用补丁后)"
           echo "========================================="
-          cd common
           
-          # 1. 纯净模式：SCTP OFF
+          cd ${{ env.WORKSPACE }}/common
+          
+          # 3.1 补丁模式：SCTP OFF
+          echo ">>> 3.1 正在编译 补丁组 (SCTP OFF)..."
           sed -i '/CONFIG_IP_SCTP/d' arch/arm64/configs/gki_defconfig
           echo "# CONFIG_IP_SCTP is not set" >> arch/arm64/configs/gki_defconfig
-          eval $MAKE_CMD gki_defconfig && eval $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
-          pahole -C net out/net/core/net_namespace.o > ../net_clean_sctp_off.txt
-          pahole -C sk_buff out/net/core/skbuff.o > ../skb_clean_sctp_off.txt
+          $MAKE_CMD gki_defconfig && $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
+          pahole -C net out/net/core/net_namespace.o > ../net_patched_sctp_off.txt
+          pahole -C sk_buff out/net/core/skbuff.o > ../skb_patched_sctp_off.txt
           
-          # 2. 纯净模式：SCTP ON
+          # 3.2 补丁模式：SCTP ON
+          echo ">>> 3.2 正在编译 补丁组 (SCTP ON)..."
           sed -i '/CONFIG_IP_SCTP/d' arch/arm64/configs/gki_defconfig
           echo "CONFIG_IP_SCTP=y" >> arch/arm64/configs/gki_defconfig
-          eval $MAKE_CMD gki_defconfig && eval $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
-          pahole -C net out/net/core/net_namespace.o > ../net_clean_sctp_on.txt
-          pahole -C sk_buff out/net/core/skbuff.o > ../skb_clean_sctp_on.txt
+          $MAKE_CMD gki_defconfig && $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
+          pahole -C net out/net/core/net_namespace.o > ../net_patched_sctp_on.txt
+          pahole -C sk_buff out/net/core/skbuff.o > ../skb_patched_sctp_on.txt
           
-          echo "✅ 云端 ABI 提取完毕（排雷流程已结束，由于脚本顺序已变更为前置应用补丁，此模式主要作基准对比参考）"
+          echo "========================================="
+          echo ">>> 阶段 4/4：生成全方位综合对比报告"
+          echo "========================================="
+          cd ${{ env.WORKSPACE }}
+          
+          diff -u net_clean_sctp_off.txt net_clean_sctp_on.txt > diff_1_clean_sctp_off_vs_on_net.txt || true
+          diff -u skb_clean_sctp_off.txt skb_clean_sctp_on.txt > diff_1_clean_sctp_off_vs_on_skb.txt || true
+          diff -u net_patched_sctp_off.txt net_patched_sctp_on.txt > diff_2_patched_sctp_off_vs_on_net.txt || true
+          diff -u skb_patched_sctp_off.txt skb_patched_sctp_on.txt > diff_2_patched_sctp_off_vs_on_skb.txt || true
+          diff -u net_clean_sctp_on.txt net_patched_sctp_on.txt > diff_3_sctp_on_clean_vs_patched_net.txt || true
+          diff -u skb_clean_sctp_on.txt skb_patched_sctp_on.txt > diff_3_sctp_on_clean_vs_patched_skb.txt || true
+          
+          zip abi_analysis_reports.zip *.txt
+          echo "✅ 2x2 正交结构体分析提取完成！"
 
       - name: 上传排雷分析
         if: inputs.vmlinux_debug == true
         uses: actions/upload-artifact@v4
         with:
           name: abi_analysis_reports_full_matrix
-          path: ${{ env.WORKSPACE }}/*.txt
+          path: ${{ env.WORKSPACE }}/abi_analysis_reports.zip
 
-      # ================== 常规构建模式：编译 Image ==================
+      # ================== 以下为常规构建 ==================
+      - name: 配置 ccache 目录
+        if: inputs.vmlinux_debug == false
+        run: |
+          echo "CCACHE_DIR=$HOME/.ccache_${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}" >> $GITHUB_ENV
+          echo "CCACHE_MAXSIZE=5G" >> $GITHUB_ENV
+
+      - name: 载入 ccache 缓存
+        if: inputs.vmlinux_debug == false
+        uses: actions/cache@v5
+        id: ccache-restore
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ env.CCACHE_KEY }}-${{ runner.os }}-${{ github.ref_name }}
+          restore-keys: |
+            ${{ env.CCACHE_KEY }}-${{ runner.os }}-
+
+      - name: 清理旧 ccache 缓存
+        if: inputs.vmlinux_debug == false && inputs.ccache_update
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh cache delete ${{ env.CCACHE_KEY }}-${{ runner.os }}-${{ github.ref_name }} -R ${{ github.repository }} || true
+
+      - name: 添加 KernelSU/SUSFS/补丁 (常规流)
+        if: inputs.vmlinux_debug == false
+        id: ksu_version
+        run: |
+          cd ${{ env.WORKSPACE }}
+          
+          echo "========== 1. 当前工作目录 =========="
+          pwd
+          
+          # KSU 安装
+          if [[ "${{ github.event.inputs.ksu_type }}" == "resukisu" ]]; then
+            echo "正在配置 ReSukiSU..."
+            curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/refs/heads/main/kernel/setup.sh" | bash -s main
+            echo "ksuver=ReSukiSU" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event.inputs.ksu_type }}" == "sukisu" ]]; then
+            echo "正在配置 SukiSU Ultra..."
+            curl -LSs "https://raw.githubusercontent.com/ShirkNeko/SukiSU-Ultra/refs/heads/main/kernel/setup.sh" | bash -s builtin
+            echo "ksuver=SukiSU" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event.inputs.ksu_type }}" == "ksunext" ]]; then
+            echo "正在配置 KernelSU Next..."
+            curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/main/kernel/setup.sh" | bash -s main
+            echo "ksuver=KernelSU-Next" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event.inputs.ksu_type }}" == "ksu" ]]; then
+            echo "正在配置 KernelSU 原版..."
+            curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+            echo "ksuver=KernelSU" >> $GITHUB_OUTPUT
+          else
+            echo "已选择无内置KernelSU模式"
+          fi
+          
+          # 克隆补丁仓库
+          echo "========== 2. 克隆补丁仓库 =========="
+          if [ ! -d "lxc_fix" ]; then
+            echo "-> 克隆仓库到 lxc_fix 目录..."
+            git clone --depth=1 https://github.com/wings110/8650-lxc-docker.git lxc_fix
+            echo "-> 克隆完成"
+          else
+            echo "-> lxc_fix 目录已存在"
+          fi
+          
+          # 移动补丁文件到根目录
+          echo "========== 3. 移动补丁文件到根目录 =========="
+          if [ -d "lxc_fix/lxc-patches" ]; then
+            mv lxc_fix/lxc-patches/* ./ 2>/dev/null || true
+            echo "移动完成"
+          fi
+          
+          # 应用所有 .patch 文件
+          echo "========== 4. 应用补丁 =========="
+          for p in ./*.patch; do
+            if [ -f "$p" ]; then
+              echo "-> 应用补丁: $p"
+              patch -p1 -F 3 < "$p" || true
+            fi
+          done
+          
+          # ========== 验证 SCTP ABI 补丁是否生效 ==========
+          echo "========== 5. 验证 SCTP ABI 补丁 =========="
+          cd common
+          
+          # 检查 net_namespace.h 是否被修改
+          if grep -q "net_sctp" include/net/net_namespace.h; then
+            echo "✅ net_namespace.h 已包含 net_sctp 宏"
+          else
+            echo "❌ net_namespace.h 未正确修改"
+          fi
+          
+          # 检查 struct net 中是否还有 sctp 字段
+          if grep -q "struct netns_sctp" include/net/net_namespace.h | grep -v "net_ext"; then
+            echo "❌ struct net 中仍然有 sctp 字段"
+          else
+            echo "✅ struct net 中已无 sctp 字段"
+          fi
+          
+          # 检查 net_ext 结构体是否包含 sctp
+          if grep -A10 "struct net_ext" include/net/net_namespace.h | grep -q "struct netns_sctp"; then
+            echo "✅ net_ext 中已包含 sctp 字段"
+          else
+            echo "⚠️ net_ext 中未找到 sctp 字段"
+          fi
+          
+          cd ${{ env.WORKSPACE }}
+          
+          # ========== 6. 执行 SCTP 源码修复脚本 ==========
+          echo "========== 6. 执行 SCTP 源码修复脚本 =========="
+          cd ${{ env.WORKSPACE }}
+          SCRIPT_PATH="./sctp_source_fix.sh"
+          
+          if [ -f "$SCRIPT_PATH" ]; then
+             echo "找到脚本，正在执行..."
+             sed -i 's/\r$//' "$SCRIPT_PATH"
+             bash "$SCRIPT_PATH"
+          else
+             echo "❌ 严重错误：未找到修复脚本 $SCRIPT_PATH"
+             ls -la
+             exit 1
+          fi
+          
+          # 写入 Config
+          echo "========== 7. 写入内核配置 =========="
+          {
+            echo "CONFIG_KSU=y"
+            if [[ "${{ github.event.inputs.better_net }}" == "true" ]]; then
+              echo "CONFIG_IP_SCTP=y"
+            fi
+            echo "CONFIG_TMPFS_XATTR=y"
+            echo "CONFIG_TMPFS_POSIX_ACL=y"
+          } >> common/arch/arm64/configs/gki_defconfig
+          
+          echo "========== 8. 验证内核配置 =========="
+          grep -E "CONFIG_KSU|CONFIG_IP_SCTP|CONFIG_TMPFS" common/arch/arm64/configs/gki_defconfig || true
+          
+          echo "✅ KernelSU/SUSFS/补丁添加完成"
+
       - name: 构建内核镜像 (常规流)
         if: inputs.vmlinux_debug == false
         run: |
           cd ${{ env.WORKSPACE }}
           export PATH="/usr/lib/ccache:$PWD/clang20/bin:$PWD/build-tools/bin:$PATH"
           export C_INCLUDE_PATH="/usr/include:/usr/include/x86_64-linux-gnu"
-          export CPATH="/usr/include:/usr/include/x86_64-linux-gnu"
-          
-          export CCACHE_COMPILERCHECK="none"
-          export CCACHE_BASEDIR="${{ github.workspace }}"
-          export CCACHE_NOHASHDIR="true"
-          export CCACHE_HARDLINK="true"
-          export CCACHE_DIR="${{ env.CCACHE_DIR }}"
-          export CCACHE_MAXSIZE="5G"
-          echo "sloppiness = file_stat_matches,include_file_ctime,include_file_mtime,pch_defines,file_macro,time_macros" >> "$CCACHE_DIR/ccache.conf"
           
           cd common
-          # 核心修复：强行注入宿主机头文件，解决 tools/bpf 下 resolve_btfids 缺少 libelf.h 的报错！
           make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            CC="ccache clang" \
-            HOSTCFLAGS="-I/usr/include -I/usr/include/x86_64-linux-gnu" \
-            HOSTLDFLAGS="-L/usr/lib/x86_64-linux-gnu" \
-            O=out gki_defconfig
-            
+            CC="ccache clang" O=out gki_defconfig
           make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            CC="ccache clang" \
-            HOSTCFLAGS="-I/usr/include -I/usr/include/x86_64-linux-gnu" \
-            HOSTLDFLAGS="-L/usr/lib/x86_64-linux-gnu" \
-            O=out Image
+            CC="ccache clang" O=out Image
 
-      - name: 保存新的 ccache 缓存
-        if: inputs.ccache_update || steps.ccache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ${{ env.CCACHE_KEY }}-${{ runner.os }}-${{ github.ref_name }}
-
-      - name: 应用KPM并修补内核
-        if: inputs.vmlinux_debug == false
-        run: |
-          if [[ ${{ github.event.inputs.kpm_enable }} == 'builtin' && ( "${{ github.event.inputs.ksu_type }}" == "sukisu" || "${{ github.event.inputs.ksu_type }}" == "resukisu" ) ]]; then
-            echo "正在应用KPM并修补内核..."
-            cd ${{ env.WORKSPACE }}/common/out/arch/arm64/boot
-            curl -LO https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/latest/download/patch_linux
-            chmod +x patch_linux
-            ./patch_linux
-            rm -f Image
-            mv oImage Image
-          fi
-          if [[ ${{ github.event.inputs.kpm_enable }} == 'kpn' ]]; then
-            echo "正在应用KP-N并修补内核..."
-            cd ${{ env.WORKSPACE }}/common/out/arch/arm64/boot
-            wget https://github.com/KernelSU-Next/KPatch-Next/releases/latest/download/kptools-linux
-            wget https://github.com/KernelSU-Next/KPatch-Next/releases/latest/download/kpimg-linux
-            chmod +x ./kptools-linux
-            ./kptools-linux -p -i ./Image -k ./kpimg-linux -o ./oImage
-            rm -f Image
-            mv oImage Image
-          fi
-          
       - name: 打包 AnyKernel3
         id: create_zip
         if: inputs.vmlinux_debug == false
         run: |
           cd ${{ env.WORKSPACE }}
-          git clone https://github.com/cctv18/AnyKernel3 --depth=1
-          rm -rf ./AnyKernel3/.git
+          git clone --depth=1 https://github.com/cctv18/AnyKernel3
+          cp common/out/arch/arm64/boot/Image AnyKernel3/
           cd AnyKernel3
-          cp ../common/out/arch/arm64/boot/Image ./Image
-          if [[ ! -f ./Image ]]; then
-            echo "未找到内核镜像文件，构建可能出错"
-            exit 1
-          fi
-          if [[ ${{ github.event.inputs.ksu_type }} == "sukisu" ]]; then
-            KSU_TYPENAME="SukiSU"
-          elif [[ ${{ github.event.inputs.ksu_type }} == "resukisu" ]]; then
-            KSU_TYPENAME="ReSukiSU"
-          elif [[ ${{ github.event.inputs.ksu_type }} == "ksunext" ]]; then
-            KSU_TYPENAME="KSUNext"
-          elif [[ ${{ github.event.inputs.ksu_type }} == "ksu" ]]; then
-            KSU_TYPENAME="KSU"
-          else
-            KSU_TYPENAME="none"
-          fi
-          if [[ ${{ github.event.inputs.lz4kd_enable }} == 'true' ]]; then
-            wget --header="Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/zram.zip || true
-          fi
-          if [[ ${{ github.event.inputs.kpm_enable }} == 'kpn' ]]; then
-            wget https://github.com/cctv18/KPatch-Next/releases/latest/download/kpn.zip
-          fi
-          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
-            AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_${{ github.event.inputs.kernel_suffix }}.zip
-          else
-            AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_${{ env.KERNEL_NAME }}.zip
-          fi
+          AK3_NAME="AnyKernel3_SCTP_LXC_${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}_${{ github.run_id }}.zip"
           zip -r ../$AK3_NAME ./*
           echo "ak3name=$AK3_NAME" >> $GITHUB_OUTPUT
-          
-          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
-            FULL_VERSION=${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}-${{ github.event.inputs.kernel_suffix }}
-          else
-            FULL_VERSION=${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}-${{ env.KERNEL_NAME }}
-          fi
-          TIME_NOW="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
-          echo "Author: $GITHUB_ACTOR" > ./ak3.log
-          echo "Repo: $GITHUB_REPOSITORY" >> ./ak3.log
-          echo "Branch: $GITHUB_REF_NAME" >> ./ak3.log
-          echo "Run ID: $GITHUB_RUN_ID" >> ./ak3.log
-          echo "Commit: $GITHUB_SHA" >> ./ak3.log
-          echo "Time: $TIME_NOW" >> ./ak3.log
-          echo "Kernel Ver: $FULL_VERSION" >> ./ak3.log
-          echo "KSU Branch: ${KSU_TYPENAME}" >> ./ak3.log
-          echo "KSU Ver: ${KSUVER}" >> ./ak3.log
-          echo "susfs: ${{ github.event.inputs.susfs_enable }}" >> ./ak3.log
-          echo "KPM: ${{ github.event.inputs.kpm_enable }}" >> ./ak3.log
-          echo "LZ4: ${{ github.event.inputs.lz4_enable }}" >> ./ak3.log
-          echo "LZ4KD: ${{ github.event.inputs.lz4kd_enable }}" >> ./ak3.log
-          echo "IPset: ${{ github.event.inputs.better_net }}" >> ./ak3.log
-          echo "BBR&Brutal: ${{ github.event.inputs.bbr_enable }}" >> ./ak3.log
-          echo "SSG: ${{ github.event.inputs.ssg_enable }}" >> ./ak3.log
-          echo "Re-Kernel: ${{ github.event.inputs.rekernel_enable }}" >> ./ak3.log
-          echo "BBG: ${{ github.event.inputs.baseband_guard }}" >> ./ak3.log
-          zip -z ../$AK3_NAME < ./ak3.log
 
-      - name: 上传 Ccache 调试日志
-        if: always() && inputs.ccache_debug
-        uses: actions/upload-artifact@v4
-        with:
-          name: ccache-debug-log
-          path: ${{ env.WORKSPACE }}/ccache.log
-          archive: true
-
-      - name: 上传 ZIP 工件
+      - name: 上传工件
         if: inputs.vmlinux_debug == false
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-zip-${{ github.run_id }}
-          path: ${{ env.WORKSPACE }}/AnyKernel*.zip
-          if-no-files-found: error
-          retention-days: 7
+          name: kernel-zip
+          path: ${{ env.WORKSPACE }}/*.zip
 
   release:
     needs: build
-    if: inputs.vmlinux_debug == false && needs.build.result == 'success' && needs.build.outputs.ak3name != ''
+    if: inputs.vmlinux_debug == false && needs.build.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      packages: write
-      actions: read
-
     steps:
-      - name: 等待 artifact 准备就绪
-        run: |
-          echo "等待 artifact 可用..."
-          sleep 10
-          
-      - name: 下载 ZIP 工件
+      - name: 下载工件
         uses: actions/download-artifact@v4
         with:
-          pattern: kernel-zip-*
-          path: ./release_zips
-          merge-multiple: true
-          
-      - name: 验证下载的文件
-        run: |
-          ls -la ./release_zips/
-          ZIP_FILE=$(find ./release_zips -name "AnyKernel3_*.zip" -o -name "*.zip" | head -1)
-          if [ -n "$ZIP_FILE" ] && [ ! -f "./release_zips/${{ needs.build.outputs.ak3name }}" ]; then
-            cp "$ZIP_FILE" "./release_zips/${{ needs.build.outputs.ak3name }}"
-          fi
-
-      - name: 设置环境变量
-        run: |
-          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
-            FULL_VERSION=${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}-${{ github.event.inputs.kernel_suffix }}
-          else
-            FULL_VERSION=${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}-${{ env.KERNEL_NAME }}
-          fi
-          echo "FULL_VERSION=$FULL_VERSION" >> $GITHUB_ENV
-          echo "TIME=$(TZ='Asia/Shanghai' date +'%y%m%d%H%M%S')" >> $GITHUB_ENV
-          echo "TIME_FORM=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
-          echo "TAG_HEAD=OPPO-OPlus-Realme-build" >> $GITHUB_ENV
-          
-          if [[ ${{ github.event.inputs.ksu_type }} == "sukisu" ]]; then
-            echo "KSU_TYPENAME=SukiSU Ultra" >> $GITHUB_ENV
-          elif [[ ${{ github.event.inputs.ksu_type }} == "resukisu" ]]; then
-            echo "KSU_TYPENAME=ReSukiSU" >> $GITHUB_ENV
-          elif [[ ${{ github.event.inputs.ksu_type }} == "ksunext" ]]; then
-            echo "KSU_TYPENAME=KernelSU Next" >> $GITHUB_ENV
-          elif [[ ${{ github.event.inputs.ksu_type }} == "ksu" ]]; then
-            echo "KSU_TYPENAME=KernelSU (Official)" >> $GITHUB_ENV
-          else
-            echo "KSU_TYPENAME=无内置KSU" >> $GITHUB_ENV
-          fi
-          
-      - name: 创建发布
-        id: create_release
+          name: kernel-zip
+          path: ./
+      - name: 发布 Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cat << 'EOF' > release_notes.md
-          ### 📱 欧加真 ${{ env.KSU_TYPENAME }} SM8650 通用内核 | 构建信息
-          - 内核版本号: ${{ env.FULL_VERSION }}
-          - 编译时间: ${{ env.TIME_FORM }}
-          - 机型：欧加真骁龙8Gen3通用 ${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }} 内核
-          - KSU分支：${{ env.KSU_TYPENAME }}
-          - susfs支持：${{ github.event.inputs.susfs_enable }}
-          - KPM支持 ：${{ github.event.inputs.kpm_enable }}
-          - LZ4支持：${{ github.event.inputs.lz4_enable }}
-          - LZ4KD支持：${{ github.event.inputs.lz4kd_enable }}
-          - 网络功能增强：${{ github.event.inputs.better_net }}
-          - BBR/Brutal 等拥塞控制算法支持：${{ github.event.inputs.bbr_enable }}
-          - 三星SSG IO调度器支持：${{ github.event.inputs.ssg_enable }}
-          - Re-Kernel支持：${{ github.event.inputs.rekernel_enable }}
-          - 内核级基带保护支持：${{ github.event.inputs.baseband_guard }}
-          
-          ### ⏫️ 更新内容：
-          - 更新${{ env.KSU_TYPENAME }}至最新版本（${{ needs.build.outputs.ksuver }}）
-          - 修复并完美加入了完整的 LXC/Docker SCTP 高级网络支持
-          - 修复 `libelf.h` 缺失及 Android Clang 工具鏈隔離問題
-          EOF
-
-          ZIP_FILE=$(find ./release_zips -name "AnyKernel3_*.zip" | head -1)
-          if [ -z "$ZIP_FILE" ]; then
-            ZIP_FILE=$(find ./release_zips -name "*.zip" | head -1)
-          fi
-          
-          gh release create "${{ env.TAG_HEAD }}-${{ env.TIME }}" \
-            --repo "${{ github.repository }}" \
-            --title "${{ env.TAG_HEAD }}-${{ env.FULL_VERSION }}" \
-            --notes-file release_notes.md \
-            "$ZIP_FILE"
+          gh release create "Build-${{ github.run_id }}" ./*.zip \
+            --title "欧加真 6.1.118 SCTP-LXC 加速版" \
+            --notes "包含 LXC/Docker 补丁与完整环境支持\n- 修复 SCTP 源码缺失问题（改用 git clone）\n- 优化补丁应用流程\n- 添加 SCTP ABI 补丁验证步骤\n- 添加完整的 SCTP 修复验证"
