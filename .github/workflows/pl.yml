@@ -1,4 +1,4 @@
-name: 000sctp-new加速版构建 6.1.118 欧加真OKI内核
+name: sctp-new加速版构建 6.1.118 欧加真OKI内核
 
 env:
   TZ: Asia/Shanghai
@@ -118,7 +118,8 @@ jobs:
       - name: 安装环境依赖+初始化源码
         run: |
           mkdir kernel_workspace && cd kernel_workspace
-          sudo apt update && sudo apt install -y --no-install-recommends binutils python-is-python3 libssl-dev libelf-dev zstd dwarves zip pkg-config aria2
+          # 【修复点】：在此处加上了 ccache，确保环境一定有该命令
+          sudo apt update && sudo apt install -y --no-install-recommends binutils python-is-python3 libssl-dev libelf-dev zstd dwarves zip pkg-config aria2 ccache
           
           # 并行克隆加速
           aria2c -s16 -x16 https://github.com/cctv18/android_kernel_common_oneplus_sm8650/archive/refs/heads/oneplus/sm8650_b_16.0.0_oneplus12.zip -o common.zip &
@@ -245,12 +246,12 @@ jobs:
           restore-keys: |
             ${{ env.CCACHE_KEY }}-${{ runner.os }}-
 
-      - name: 安装 ccache 并清理旧缓存
+      - name: 清理旧 ccache 缓存
         if: inputs.vmlinux_debug == false && inputs.ccache_update
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          sudo apt install -y ccache
+          # 【修复点】：去掉了 sudo apt install -y ccache，仅保留清理逻辑
           gh cache delete ${{ env.CCACHE_KEY }}-${{ runner.os }}-${{ github.ref_name }} -R ${{ github.repository }} || true
 
       - name: 添加 KernelSU/SUSFS/补丁 (常规流)
