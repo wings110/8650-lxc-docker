@@ -7,7 +7,6 @@ env:
   SUB_VERSION: '118'
   KERNEL_NAME: 'android14-11-o-gca13bffobf09'
   CCACHE_KEY: ccache-lxc-6.1.118
-  # 固定工作目录路径
   WORKSPACE: /home/runner/work/kernel_workspace
 
 on:
@@ -108,16 +107,68 @@ jobs:
       actions: write
       contents: read
     steps:
-      - name: 释放磁盘空间
+      - name: 释放磁盘空间（激进模式）
         uses: easimon/maximize-build-space@master
         with:
-          root-reserve-mb: 5120
+          root-reserve-mb: 2048
           swap-size-mb: 2048
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-docker-images: 'true'
           remove-haskell: 'true'
           remove-codeql: 'true'
+          remove-large-packages: 'true'
+
+      - name: 额外激进清理磁盘（借鉴成功经验）
+        run: |
+          echo "========== 开始激进清理 =========="
+          
+          # 锁定并删除不必要的包
+          sudo apt-mark hold firefox || true
+          sudo apt-mark hold libc-bin || true
+          sudo apt purge -y man-db || true
+          sudo rm -rf /var/lib/man-db/auto-update
+          
+          # 删除大型预装软件
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/lib/jvm
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /opt/microsoft
+          sudo rm -rf /usr/local/graalvm
+          sudo rm -rf /opt/az
+          sudo rm -rf /usr/share/az_
+          
+          # 清理包管理器缓存
+          sudo apt clean
+          sudo apt autoclean
+          sudo apt autoremove --purge -y
+          sudo rm -rf /var/lib/apt/lists/*
+          sudo rm -rf /var/cache/apt/archives/*.deb
+          
+          # 清理日志和临时文件
+          sudo journalctl --vacuum-size=10M
+          sudo rm -rf /tmp/* /var/tmp/*
+          rm -rf ~/.cache/* ~/.npm ~/.cargo ~/.rustup ~/.local/share/pip
+          
+          # 清理 Docker 残留
+          sudo rm -rf /var/lib/docker || true
+          sudo rm -rf /var/lib/containerd || true
+          
+          # 清理 Python 缓存
+          sudo find / -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+          
+          echo "========== 清理完成 =========="
+          df -h
+          FREE_GB=$(df / | awk 'NR==2 {print int($4/1024/1024)}')
+          echo "可用空间: ${FREE_GB}GB"
+          
+          if [ $FREE_GB -lt 10 ]; then
+            echo "警告: 剩余空间不足 10GB"
+          fi
 
       - name: 安装环境依赖+初始化源码
         run: |
@@ -392,4 +443,4 @@ jobs:
         run: |
           gh release create "Build-${{ github.run_id }}" ./*.zip \
             --title "欧加真 6.1.118 SCTP-LXC 加速版" \
-            --notes "包含 LXC/Docker 补丁与完整环境支持"
+            --notes "包含 LXC/Docker 补丁与完整环境支持\n- 修复 SCTP 源码缺失问题\n- 优化补丁应用流程\n- 优化磁盘空间清理"
