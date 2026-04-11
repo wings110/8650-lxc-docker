@@ -215,45 +215,11 @@ jobs:
           echo "========== 克隆补丁仓库 =========="
           git clone --depth=1 https://github.com/wings110/8650-lxc-docker.git lxc_fix
           
-          # ========== 诊断 lxc-patches 目录内容 ==========
-          echo "========== 诊断 lxc-patches 目录内容 =========="
-          if [ -d "lxc_fix" ]; then
-            echo "✅ lxc_fix 目录存在"
-            echo "========== lxc_fix 根目录内容 =========="
-            ls -la lxc_fix/
-            
-            if [ -d "lxc_fix/lxc-patches" ]; then
-              echo "========== lxc_fix/lxc-patches 目录内容 =========="
-              ls -la lxc_fix/lxc-patches/
-              
-              echo "========== 详细列出所有文件 =========="
-              ls -la lxc_fix/lxc-patches/ | cat
-              
-              echo "========== 只列出 .patch 文件 =========="
-              ls -la lxc_fix/lxc-patches/*.patch 2>/dev/null || echo "没有 .patch 文件"
-              
-              echo "========== 只列出 .sh 文件 =========="
-              ls -la lxc_fix/lxc-patches/*.sh 2>/dev/null || echo "没有 .sh 文件"
-              
-              echo "========== 列出所有文件类型 =========="
-              find lxc_fix/lxc-patches/ -type f -exec file {} \;
-            else
-              echo "❌ lxc_fix/lxc-patches 目录不存在"
-            fi
-            
-            echo "========== 检查 lxc_fix 根目录的 .sh 文件 =========="
-            find lxc_fix/ -name "*.sh" -type f 2>/dev/null || echo "没有找到 .sh 文件"
-          else
-            echo "❌ lxc_fix 目录不存在"
-          fi
-          
           # 将 lxc-patches 里的所有文件移动到根目录
           echo "正在移动补丁文件到根目录..."
           if [ -d "lxc_fix/lxc-patches" ]; then
             mv lxc_fix/lxc-patches/* ./ 2>/dev/null || true
             echo "移动完成"
-          else
-            echo "⚠️ lxc_fix/lxc-patches 目录不存在，跳过移动"
           fi
           
           # 应用所有 .patch 文件
@@ -265,17 +231,49 @@ jobs:
             fi
           done
           
-          # 检查是否需要执行 SCTP 脚本
-          echo "========== 检查 SCTP 脚本 =========="
-          if [ -f "./sctp_source_fix_safe.sh" ]; then
-            echo "✅ 找到脚本，执行中..."
-            chmod +x ./sctp_source_fix_safe.sh
-            cd common
-            bash ../sctp_source_fix_safe.sh
-            cd ${{ env.WORKSPACE }}
+          # 直接修复 SCTP 源码（不使用外部脚本，确保路径正确）
+          echo "========== 直接修复 SCTP 源码 =========="
+          cd common
+          echo "当前目录: $(pwd)"
+          
+          if [ -d "net/sctp" ]; then
+            echo "✅ 找到 net/sctp，开始修复..."
+            
+            # 修复所有 .c 文件中的指针引用
+            echo ">>> 修复指针引用..."
+            find net/sctp -name "*.c" -exec sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' {} \;
+            
+            # 修复头文件
+            if [ -f "include/net/sctp/structs.h" ]; then
+              echo ">>> 修复头文件..."
+              sed -i 's/struct netns_sctp \*sctp;/struct netns_sctp sctp;/g' include/net/sctp/structs.h 2>/dev/null || true
+            fi
+            
+            # 修复 sysctl.c
+            if [ -f "net/sctp/sysctl.c" ]; then
+              echo ">>> 修复 sysctl.c..."
+              sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' net/sctp/sysctl.c 2>/dev/null || true
+            fi
+            
+            # 修复 protocol.c
+            if [ -f "net/sctp/protocol.c" ]; then
+              echo ">>> 修复 protocol.c..."
+              sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' net/sctp/protocol.c 2>/dev/null || true
+            fi
+            
+            echo "✅ SCTP 修复完成"
+            
+            # 验证修复结果
+            if grep -q "&net->sctp" net/sctp/sysctl.c 2>/dev/null; then
+              echo "✅ 验证：sysctl.c 已修复"
+            else
+              echo "⚠️ 验证：sysctl.c 可能未修复"
+            fi
           else
-            echo "⚠️ sctp_source_fix_safe.sh 不存在，跳过（补丁已包含修复）"
+            echo "❌ net/sctp 不存在"
           fi
+          
+          cd ${{ env.WORKSPACE }}
           
           echo "========================================="
           echo ">>> 阶段 3/4：【补丁模式】提取结构体 (应用补丁后)"
@@ -353,7 +351,6 @@ jobs:
           
           echo "========== 1. 当前工作目录 =========="
           pwd
-          ls -la
           
           # KSU 安装
           if [[ "${{ github.event.inputs.ksu_type }}" == "resukisu" ]]; then
@@ -376,11 +373,8 @@ jobs:
             echo "已选择无内置KernelSU模式"
           fi
           
-          echo "========== 2. KSU 安装后目录状态 =========="
-          ls -la
-          
           # 克隆补丁仓库
-          echo "========== 3. 克隆补丁仓库 =========="
+          echo "========== 2. 克隆补丁仓库 =========="
           if [ ! -d "lxc_fix" ]; then
             echo "-> 克隆仓库到 lxc_fix 目录..."
             git clone --depth=1 https://github.com/wings110/8650-lxc-docker.git lxc_fix
@@ -389,54 +383,15 @@ jobs:
             echo "-> lxc_fix 目录已存在"
           fi
           
-          # ========== 诊断 lxc-patches 目录内容 ==========
-          echo "========== 4. 诊断 lxc-patches 目录内容 =========="
-          if [ -d "lxc_fix" ]; then
-            echo "✅ lxc_fix 目录存在"
-            echo "========== lxc_fix 根目录内容 =========="
-            ls -la lxc_fix/
-            
-            if [ -d "lxc_fix/lxc-patches" ]; then
-              echo "========== lxc_fix/lxc-patches 目录内容 =========="
-              ls -la lxc_fix/lxc-patches/
-              
-              echo "========== 详细列出所有文件 =========="
-              ls -la lxc_fix/lxc-patches/ | cat
-              
-              echo "========== 只列出 .patch 文件 =========="
-              ls -la lxc_fix/lxc-patches/*.patch 2>/dev/null || echo "没有 .patch 文件"
-              
-              echo "========== 只列出 .sh 文件 =========="
-              ls -la lxc_fix/lxc-patches/*.sh 2>/dev/null || echo "没有 .sh 文件"
-              
-              echo "========== 列出所有文件类型 =========="
-              find lxc_fix/lxc-patches/ -type f -exec file {} \;
-            else
-              echo "❌ lxc_fix/lxc-patches 目录不存在"
-            fi
-            
-            echo "========== 检查 lxc_fix 根目录的 .sh 文件 =========="
-            find lxc_fix/ -name "*.sh" -type f 2>/dev/null || echo "没有找到 .sh 文件"
-          else
-            echo "❌ lxc_fix 目录不存在"
-          fi
-          
           # 移动补丁文件到根目录
-          echo "========== 5. 移动补丁文件到根目录 =========="
+          echo "========== 3. 移动补丁文件到根目录 =========="
           if [ -d "lxc_fix/lxc-patches" ]; then
-            echo "移动前根目录文件列表:"
-            ls -la *.patch *.sh 2>/dev/null || echo "暂无"
-            
             mv lxc_fix/lxc-patches/* ./ 2>/dev/null || true
-            
-            echo "移动后根目录文件列表:"
-            ls -la *.patch *.sh 2>/dev/null || echo "无文件"
-          else
-            echo "⚠️ lxc_fix/lxc-patches 目录不存在，跳过移动"
+            echo "移动完成"
           fi
           
           # 应用所有 .patch 文件
-          echo "========== 6. 应用补丁 =========="
+          echo "========== 4. 应用补丁 =========="
           for p in ./*.patch; do
             if [ -f "$p" ]; then
               echo "-> 应用补丁: $p"
@@ -444,28 +399,62 @@ jobs:
             fi
           done
           
-          # 检查并执行 SCTP 脚本
-          echo "========== 7. 检查 SCTP 脚本 =========="
-          if [ -f "./sctp_source_fix_safe.sh" ]; then
-            echo "✅ 找到脚本: sctp_source_fix_safe.sh，执行中..."
-            chmod +x ./sctp_source_fix_safe.sh
+          # 直接修复 SCTP 源码（不使用外部脚本，确保路径正确）
+          echo "========== 5. 直接修复 SCTP 源码 =========="
+          
+          # 验证 SCTP 目录存在
+          if [ ! -d "common/net/sctp" ]; then
+            echo "❌ common/net/sctp 不存在，跳过修复"
+          else
+            echo "✅ common/net/sctp 存在"
+            
+            # 进入 common 目录
             cd common
             echo "当前目录: $(pwd)"
-            echo "执行前检查 SCTP 目录:"
+            
             if [ -d "net/sctp" ]; then
-              echo "  ✅ net/sctp 存在"
+              echo "✅ 找到 net/sctp，开始修复..."
+              
+              # 修复所有 .c 文件中的指针引用
+              echo ">>> 修复指针引用..."
+              find net/sctp -name "*.c" -exec sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' {} \;
+              
+              # 修复头文件
+              if [ -f "include/net/sctp/structs.h" ]; then
+                echo ">>> 修复头文件..."
+                sed -i 's/struct netns_sctp \*sctp;/struct netns_sctp sctp;/g' include/net/sctp/structs.h 2>/dev/null || true
+              fi
+              
+              # 修复 sysctl.c
+              if [ -f "net/sctp/sysctl.c" ]; then
+                echo ">>> 修复 sysctl.c..."
+                sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' net/sctp/sysctl.c 2>/dev/null || true
+              fi
+              
+              # 修复 protocol.c
+              if [ -f "net/sctp/protocol.c" ]; then
+                echo ">>> 修复 protocol.c..."
+                sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' net/sctp/protocol.c 2>/dev/null || true
+              fi
+              
+              echo "✅ SCTP 修复完成"
+              
+              # 验证修复结果
+              if grep -q "&net->sctp" net/sctp/sysctl.c 2>/dev/null; then
+                echo "✅ 验证：sysctl.c 已修复"
+              else
+                echo "⚠️ 验证：sysctl.c 可能未修复"
+              fi
             else
-              echo "  ❌ net/sctp 不存在"
+              echo "❌ net/sctp 不存在"
             fi
-            bash ../sctp_source_fix_safe.sh
+            
+            # 回到工作区根目录
             cd ${{ env.WORKSPACE }}
-          else
-            echo "⚠️ sctp_source_fix_safe.sh 不存在"
-            echo "补丁 sctp_abi_fix.patch 已包含 SCTP 修复，无需额外脚本"
           fi
           
           # 写入 Config
-          echo "========== 8. 写入内核配置 =========="
+          echo "========== 6. 写入内核配置 =========="
           {
             echo "CONFIG_KSU=y"
             if [[ "${{ github.event.inputs.better_net }}" == "true" ]]; then
@@ -475,7 +464,7 @@ jobs:
             echo "CONFIG_TMPFS_POSIX_ACL=y"
           } >> common/arch/arm64/configs/gki_defconfig
           
-          echo "========== 9. 验证内核配置 =========="
+          echo "========== 7. 验证内核配置 =========="
           grep -E "CONFIG_KSU|CONFIG_IP_SCTP|CONFIG_TMPFS" common/arch/arm64/configs/gki_defconfig || true
           
           echo "✅ KernelSU/SUSFS/补丁添加完成"
@@ -530,4 +519,4 @@ jobs:
         run: |
           gh release create "Build-${{ github.run_id }}" ./*.zip \
             --title "欧加真 6.1.118 SCTP-LXC 加速版" \
-            --notes "包含 LXC/Docker 补丁与完整环境支持\n- 修复 SCTP 源码缺失问题（改用 git clone）\n- 优化补丁应用流程\n- 添加详细目录诊断日志"
+            --notes "包含 LXC/Docker 补丁与完整环境支持\n- 修复 SCTP 源码缺失问题（改用 git clone）\n- 优化补丁应用流程\n- 直接修复 SCTP 源码确保路径正确"
