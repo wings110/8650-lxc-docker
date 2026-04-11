@@ -529,6 +529,11 @@ jobs:
           export PATH="$WORKDIR/kernel_workspace/clang20/bin:$PATH"
           export PATH="$WORKDIR/kernel_workspace/build-tools/bin:$PATH"
           
+          # 【核心修复】：强行打通 Android LLVM 与 Ubuntu 宿主机的头文件/库文件隔离墙
+          export C_INCLUDE_PATH="/usr/include:/usr/include/x86_64-linux-gnu"
+          export CPLUS_INCLUDE_PATH="/usr/include:/usr/include/x86_64-linux-gnu"
+          export LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu"
+          
           export CCACHE_COMPILERCHECK="none"
           export CCACHE_BASEDIR="${{ github.workspace }}"
           export CCACHE_NOHASHDIR="true"
@@ -609,6 +614,12 @@ jobs:
           export PATH="/usr/lib/ccache:$PATH"
           export PATH="$WORKDIR/kernel_workspace/clang20/bin:$PATH"
           export PATH="$WORKDIR/kernel_workspace/build-tools/bin:$PATH"
+          
+          # 【核心修复】：强行打通 Android LLVM 与 Ubuntu 宿主机的头文件/库文件隔离墙
+          export C_INCLUDE_PATH="/usr/include:/usr/include/x86_64-linux-gnu"
+          export CPLUS_INCLUDE_PATH="/usr/include:/usr/include/x86_64-linux-gnu"
+          export LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu"
+          
           CLANG_DIR="$WORKDIR/kernel_workspace/clang20/bin"
           CLANG_VERSION="$($CLANG_DIR/clang --version | head -n 1)"
           LLD_VERSION="$($CLANG_DIR/ld.lld --version | head -n 1)"
