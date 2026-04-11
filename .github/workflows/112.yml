@@ -1,4 +1,4 @@
-name: 精准sctp-new加速版构建 6.1.118 欧加真OKI内核
+name: 纯净排雷模式加速版构建 6.1.118 欧加真OKI内核
 
 # 提升 env 变量至全局，确保 build 和 release 两个 job 都能读取到版本号
 env:
