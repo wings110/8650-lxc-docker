@@ -1,7 +1,21 @@
 diff --git a/common/include/net/net_namespace.h b/common/include/net/net_namespace.h
 --- a/common/include/net/net_namespace.h
 +++ b/common/include/net/net_namespace.h
-@@ -134,7 +134,4 @@ struct net {
+@@ -56,9 +56,13 @@ struct bpf_prog;
+ 
+ /* ABI Hack: 外挂结构体，用于存放 NFTables 以防止 struct net 膨胀 */
+ struct net_ext {
++	struct net		*net;
+ #if defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE)
+ 	struct netns_nftables	nft;
+ #endif
++#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
++	struct netns_sctp	sctp;
++#endif
+ };
+ 
+ 
+@@ -136,9 +140,6 @@ struct net {
  #if IS_ENABLED(CONFIG_IEEE802154_6LOWPAN)
   	struct netns_ieee802154_lowpan	ieee802154_lowpan;
  #endif
@@ -9,57 +23,41 @@ diff --git a/common/include/net/net_namespace.h b/common/include/net/net_namespa
 -	struct netns_sctp	sctp;
 -#endif
  #ifdef CONFIG_NETFILTER
-@@ -188,3 +185,11 @@ struct net {
- 	/* Force padding: */
--	struct sock		*:64;
-+	/* ABI Hack: 存放独立的 SCTP 结构体防止位移 */
-+	union {
-+		struct sock		*:64;
-+		struct {
-+#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
-+			struct sctp_ext *sctp_ptr;
-+#endif
-+		};
-+	};
- 	struct sock		*:64;
-@@ -451,3 +456,10 @@ static inline void net_ns_init(void) {}
+  	struct netns_nf		nf;
+ #if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
+@@ -462,4 +463,8 @@ static inline void net_ns_init(void) {}
  #define net_nft(_net)		((_net)->ext->nft)
  #endif
+ 
 +#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
-+struct sctp_ext {
-+	struct net *net;
-+	struct netns_sctp sctp;
-+};
-+#define net_sctp(_net) ((_net)->sctp_ptr->sctp)
++#define net_sctp(_net)		((_net)->ext->sctp)
 +#endif
++
  #endif /* __NET_NET_NAMESPACE_H */
 diff --git a/common/net/core/net_namespace.c b/common/net/core/net_namespace.c
 --- a/common/net/core/net_namespace.c
 +++ b/common/net/core/net_namespace.c
-@@ -419,2 +419,10 @@ static struct net *net_alloc(void)
+@@ -46,12 +46,13 @@ static struct net *net_alloc(void)
  	if (!net)
  		goto out_free;
-+#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
-+	/* 为 SCTP 结构体申请独立内存 */
-+	net->sctp_ptr = kzalloc(sizeof(struct sctp_ext), GFP_KERNEL);
-+	if (!net->sctp_ptr) {
-+		goto out_free_net;
-+	}
-+	net->sctp_ptr->net = net;
-+#endif
-@@ -443,3 +451,8 @@ static struct net *net_alloc(void)
+ 
+-#if defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE)
++#if defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE) || defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
+ 	net->ext = kzalloc(sizeof(*net->ext), GFP_KERNEL);
+ 	if (!net->ext) {
+ 		kmem_cache_free(net_cachep, net);
+ 		goto out_free;
+ 	}
++	net->ext->net = net;
+ #endif
+ 
  #ifdef CONFIG_KEYS
-+out_free_ext:
-+#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
-+	kfree(net->sctp_ptr);
-+out_free_net:
-+#endif
- out_free_2:
+@@ -438,7 +439,7 @@ static void net_free(struct net *net)
+ 	if (net->ucounts)
+ 		dec_ucount(net->ucounts, UCOUNT_NET_NAMESPACES);
+ 	kfree(net->key_domain);
+-#if defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE)
++#if defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE) || defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
+ 	kfree(net->ext);
+ #endif
  	kmem_cache_free(net_cachep, net);
-@@ -475,3 +488,6 @@ void net_drop_ns(void *p)
- 	if (net && refcount_dec_and_test(&net->passive)) {
- 		kfree(rcu_access_pointer(net->gen));
-+#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
-+		kfree(net->sctp_ptr);
-+#endif
- 		/* There should not be any trackers left there. */
