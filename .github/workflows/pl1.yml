@@ -220,14 +220,12 @@ jobs:
             patch -p1 -F 3 < "$p" || true
           done
           
-          # 创建安全的 sctp 修复脚本（现在 SCTP 源码应该存在）
+          # 创建安全的 sctp 修复脚本（注意：已经在 common 目录内执行，不需要再 cd common）
           cat > lxc_fix/lxc-patches/sctp_source_fix_safe.sh << 'SCRIPT_EOF'
           #!/bin/bash
           echo ">>> 正在外科手术式修复 SCTP 核心源码引用（安全模式）..."
           
-          cd common || exit 1
-          
-          # 检查 SCTP 源码目录
+          # 检查 SCTP 源码目录（已经在 common 目录内）
           if [ ! -d "net/sctp" ]; then
               echo "⚠️ 警告: net/sctp 源码目录不存在，跳过 SCTP 源码修复"
               exit 0
@@ -251,7 +249,7 @@ jobs:
           SCRIPT_EOF
           chmod +x lxc_fix/lxc-patches/sctp_source_fix_safe.sh
           
-          # cd common
+          # 执行脚本（当前已经在 common 目录）
           bash ../lxc_fix/lxc-patches/sctp_source_fix_safe.sh
           
           echo "========================================="
@@ -352,11 +350,11 @@ jobs:
             patch -p1 -F 3 < "$p" || true
           done
           
-          # 创建安全修复脚本并执行
+          # 创建安全修复脚本（注意：已经在 common 目录内执行，不需要再 cd common）
           cat > lxc_fix/lxc-patches/sctp_source_fix_safe.sh << 'SCRIPT_EOF'
           #!/bin/bash
           echo ">>> SCTP 源码安全修复..."
-          cd common || exit 1
+          # 已经在 common 目录内
           if [ -d "net/sctp" ] && [ -f "net/sctp/sysctl.c" ]; then
               find net/sctp -name "*.c" -exec sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' {} \;
               echo "✅ SCTP 修复应用"
@@ -366,7 +364,8 @@ jobs:
           SCRIPT_EOF
           chmod +x lxc_fix/lxc-patches/sctp_source_fix_safe.sh
           
-          # cd common
+          # 进入 common 目录并执行脚本
+          cd common
           bash ../lxc_fix/lxc-patches/sctp_source_fix_safe.sh
           
           # 写入 Config
