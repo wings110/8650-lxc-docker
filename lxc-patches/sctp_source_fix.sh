@@ -10,7 +10,7 @@ elif [ ! -d "net/sctp" ]; then
 fi
 
 # =========================================================
-# 1. 极度精准的 Perl 三重替换魔法 (绝不误伤任何外部宏或函数)
+# 1. 终极替换魔法：使用 Perl 正则引擎
 # =========================================================
 find net/sctp include/net/sctp -type f -name "*.[ch]" -exec perl -pi -e '
     # 规则 1: 仅匹配已知的、返回 net 指针的函数 (如 sock_net(sk)->sctp)
@@ -19,16 +19,20 @@ find net/sctp include/net/sctp -type f -name "*.[ch]" -exec perl -pi -e '
     # 规则 2: 匹配被括号严格包裹的指针 (如 (net)->sctp )
     s/\(\s*([a-zA-Z0-9_]+(?:(?:->|\.)[a-zA-Z0-9_]+)*)\s*\)->sctp\b/net_sctp(($1))/g;
 
-    # 规则 3: 匹配最常规的纯净变量和属性链 (如 net->sctp 或 ep->base.net->sctp )
+    # 规则 3: 匹配最常规的纯净变量和属性链 (如 net->sctp )
     s/\b([a-zA-Z0-9_]+(?:(?:->|\.)[a-zA-Z0-9_]+)*)->sctp\b/net_sctp($1)/g;
 ' {} +
 
 # =========================================================
-# 2. sysctl.c 专属高危排雷 (修复 container_of 反向指针寻址崩溃)
+# 2. 修复各种隐蔽的宏内存倒推寻址 (from_timer / container_of)
 # =========================================================
+# 修复 sysctl.c
 sed -i 's/#include <linux\/sysctl.h>/#include <linux\/sysctl.h>\n\n#define sctp_net_from_data(data_ptr, field) (container_of((data_ptr), struct net_ext, sctp.field)->net)\nstatic struct netns_sctp sctp_sysctl_defaults;/g' net/sctp/sysctl.c 2>/dev/null || true
 sed -i 's/container_of(\([^,]*\),[ \t]*struct[ \t]*net[ \t]*,[ \t]*sctp\.\([a-zA-Z0-9_]*\))/sctp_net_from_data(\1, \2)/g' net/sctp/sysctl.c 2>/dev/null || true
 sed -i 's/init_net\.sctp/sctp_sysctl_defaults/g' net/sctp/sysctl.c 2>/dev/null || true
+
+# 修复 protocol.c 中的 from_timer 黑魔法 (本次报错的核心！)
+sed -i 's/from_timer(net, t, sctp\.\([a-zA-Z0-9_]*\))/container_of(t, struct net_ext, sctp.\1)->net/g' net/sctp/protocol.c 2>/dev/null || true
 
 # =========================================================
 # 3. 修正 structs.h
