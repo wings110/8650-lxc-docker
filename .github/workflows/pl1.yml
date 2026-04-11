@@ -107,14 +107,22 @@ jobs:
       actions: write
       contents: read
     steps:
-      - name: 释放磁盘空间
-        uses: easimon/maximize-build-space@master
-        with:
-          root-reserve-mb: 8192
-          swap-size-mb: 1024
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-docker-images: 'true'
+      - name: 清理磁盘空间 (参考fastbuild配置)
+        run: |
+          echo "========== 开始清理系统无用依赖 =========="
+          sudo apt-mark hold firefox || true
+          sudo apt-mark hold libc-bin || true
+          sudo apt purge -y man-db || true
+          sudo rm -rf /var/lib/man-db/auto-update
+          
+          # 清除占用空间极大的预置环境
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          
+          echo "========== 磁盘空间清理完成 =========="
+          df -h
 
       - name: 安装环境依赖+初始化源码（使用 git clone）
         run: |
@@ -125,7 +133,7 @@ jobs:
             binutils python-is-python3 libssl-dev libelf-dev zstd dwarves zip \
             pkg-config aria2 ccache patch git
             
-          echo "========== 磁盘空间检查 =========="
+          echo "========== 当前磁盘空间检查 =========="
           df -h
           
           # 使用 git clone 获取完整内核源码（确保不丢失任何目录）
@@ -421,4 +429,4 @@ jobs:
         run: |
           gh release create "Build-${{ github.run_id }}" ./*.zip \
             --title "欧加真 6.1.118 SCTP-LXC 加速版" \
-            --notes "包含 LXC/Docker 补丁与完整环境支持\n- 修复 SCTP 源码缺失问题（改用 git clone）\n- 优化补丁应用流程\n- 使用 Action 高效清理磁盘空间"
+            --notes "包含 LXC/Docker 补丁与完整环境支持\n- 修复 SCTP 源码缺失问题（改用 git clone）\n- 优化补丁应用流程\n- 参考 fastbuild 配置优化磁盘清理策略"
