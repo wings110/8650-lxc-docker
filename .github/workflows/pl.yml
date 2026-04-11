@@ -1,4 +1,4 @@
-name: 123sctp-new加速版构建 6.1.118 欧加真OKI内核
+name: sctp-new加速版构建 6.1.118 欧加真OKI内核
 
 env:
   TZ: Asia/Shanghai
@@ -117,14 +117,9 @@ jobs:
 
       - name: 安装环境依赖+初始化源码
         run: |
-          # 统一在根目录下工作，避免路径混乱
-          mkdir -p kernel_workspace && cd kernel_workspace
-          WORKSPACE=$(pwd)
-          echo "WORKSPACE=$WORKSPACE" >> $GITHUB_ENV
-          
-          sudo apt update && sudo apt install -y --no-install-recommends \
-            binutils python-is-python3 libssl-dev libelf-dev zstd dwarves zip \
-            pkg-config aria2 ccache patch
+          mkdir kernel_workspace && cd kernel_workspace
+          # 【修复点】：在此处加上了 ccache，确保环境一定有该命令
+          sudo apt update && sudo apt install -y --no-install-recommends binutils python-is-python3 libssl-dev libelf-dev zstd dwarves zip pkg-config aria2 ccache
           
           # 并行克隆加速
           aria2c -s16 -x16 https://github.com/cctv18/android_kernel_common_oneplus_sm8650/archive/refs/heads/oneplus/sm8650_b_16.0.0_oneplus12.zip -o common.zip &
@@ -145,10 +140,11 @@ jobs:
       - name: 【云端 ABI 排雷】纯净组与补丁组双向对比
         if: inputs.vmlinux_debug == true
         run: |
-          cd ${{ env.WORKSPACE }}
-          export PATH="/usr/lib/ccache:$PWD/clang20/bin:$PWD/build-tools/bin:$PATH"
+          WORKDIR="$(pwd)"
+          export PATH="/usr/lib/ccache:$WORKDIR/kernel_workspace/clang20/bin:$WORKDIR/kernel_workspace/build-tools/bin:$PATH"
           export C_INCLUDE_PATH="/usr/include:/usr/include/x86_64-linux-gnu"
           
+          cd kernel_workspace
           MAKE_CMD="make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang O=out"
           
           echo "========================================="
@@ -175,43 +171,16 @@ jobs:
           echo "========================================="
           echo ">>> 阶段 2/4：【应用补丁】打入 LXC/Docker 修复"
           echo "========================================="
-          cd ${{ env.WORKSPACE }}
-          
+          cd ..
           git clone --depth=1 https://github.com/wings110/8650-lxc-docker.git lxc_fix
-          
-          # 应用所有 .patch 文件 (从 workspace 根目录，-p1 匹配 a/common/...)
+          # 应用所有 .patch 文件
           for p in ./lxc_fix/lxc-patches/*.patch; do
             echo "-> 应用补丁: $p"
-            patch -p1 -F 3 < "$p" || true
+            patch -p1 -d common -F 3 < "$p" || true
           done
-          
-          # 【关键修复】创建安全的 sctp 修复脚本，处理源码不存在的情况
-          cat > lxc_fix/lxc-patches/sctp_source_fix_safe.sh << 'EOF'
-          #!/bin/bash
-          echo ">>> 正在外科手术式修复 SCTP 核心源码引用（安全模式）..."
-          
-          # 检查 SCTP 源码是否存在
-          if [ ! -d "common/net/sctp" ]; then
-              echo "⚠️ 警告: SCTP 源码目录不存在，跳过 SCTP 源码修复"
-              echo "   这是正常的，如果内核配置了 CONFIG_IP_SCTP=m 或未启用"
-              exit 0
-          fi
-          
-          # 仅当存在时才修复
-          if [ -f "common/net/sctp/sysctl.c" ]; then
-              echo "✅ 找到 SCTP 源码，应用 ABI 兼容性修复..."
-              sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' common/net/sctp/sysctl.c 2>/dev/null || true
-              sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' common/net/sctp/protocol.c 2>/dev/null || true
-              sed -i 's/sn->/sn->/g' common/net/sctp/sysctl.c 2>/dev/null || true
-              echo "✅ SCTP 修复完成"
-          else
-              echo "⚠️ SCTP 源码不完整，跳过修复（不影响 LXC 功能）"
-          fi
-          EOF
-          chmod +x lxc_fix/lxc-patches/sctp_source_fix_safe.sh
-          
+          # 执行 SCTP 源码专项修复脚本
           cd common
-          bash ../lxc_fix/lxc-patches/sctp_source_fix_safe.sh
+          bash ../lxc_fix/lxc-patches/sctp_source_fix.sh || true
           
           echo "========================================="
           echo ">>> 阶段 3/4：【补丁模式】提取结构体 (应用补丁后)"
@@ -236,7 +205,7 @@ jobs:
           echo "========================================="
           echo ">>> 阶段 4/4：生成全方位综合对比报告"
           echo "========================================="
-          cd ${{ env.WORKSPACE }}
+          cd ..
           
           # 分析 1：纯净源码下，单独开启 SCTP 会导致什么变化？
           diff -u net_clean_sctp_off.txt net_clean_sctp_on.txt > diff_1_clean_sctp_off_vs_on_net.txt || true
@@ -246,7 +215,7 @@ jobs:
           diff -u net_patched_sctp_off.txt net_patched_sctp_on.txt > diff_2_patched_sctp_off_vs_on_net.txt || true
           diff -u skb_patched_sctp_off.txt skb_patched_sctp_on.txt > diff_2_patched_sctp_off_vs_on_skb.txt || true
           
-          # 分析 3：(附加题) 同样是开启 SCTP，纯净源码和打补丁之后的结构体有什么区别？
+          # 分析 3：(附加题) 同样是开启 SCTP，纯净源码和打补丁之后的结构体有什么区别？(看穿补丁对 ABI 的影响)
           diff -u net_clean_sctp_on.txt net_patched_sctp_on.txt > diff_3_sctp_on_clean_vs_patched_net.txt || true
           diff -u skb_clean_sctp_on.txt skb_patched_sctp_on.txt > diff_3_sctp_on_clean_vs_patched_skb.txt || true
           
@@ -258,7 +227,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: abi_analysis_reports_full_matrix
-          path: ${{ env.WORKSPACE }}/abi_analysis_reports.zip
+          path: kernel_workspace/abi_analysis_reports.zip
 
       # ================== 以下为常规构建 (当 debug 为 false 时运行) ==================
       - name: 配置 ccache 目录
@@ -282,57 +251,35 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # 【修复点】：去掉了 sudo apt install -y ccache，仅保留清理逻辑
           gh cache delete ${{ env.CCACHE_KEY }}-${{ runner.os }}-${{ github.ref_name }} -R ${{ github.repository }} || true
 
       - name: 添加 KernelSU/SUSFS/补丁 (常规流)
         if: inputs.vmlinux_debug == false
         id: ksu_version
         run: |
-          cd ${{ env.WORKSPACE }}
-          
+          cd kernel_workspace
           # KSU 安装
-          if [[ "${{ github.event.inputs.ksu_type }}" == "resukisu" ]]; then
+          if [[ ${{ github.event.inputs.ksu_type }} == "resukisu" ]]; then
             curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/refs/heads/main/kernel/setup.sh" | bash -s main
             echo "ksuver=ReSukiSU" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.event.inputs.ksu_type }}" == "sukisu" ]]; then
+          elif [[ ${{ github.event.inputs.ksu_type }} == "sukisu" ]]; then
             curl -LSs "https://raw.githubusercontent.com/ShirkNeko/SukiSU-Ultra/refs/heads/main/kernel/setup.sh" | bash -s builtin
             echo "ksuver=SukiSU" >> $GITHUB_OUTPUT
           fi
           
-          # 克隆补丁仓库（如果还未克隆）
-          if [ ! -d "lxc_fix" ]; then
-            git clone --depth=1 https://github.com/wings110/8650-lxc-docker.git lxc_fix
-          fi
-          
-          # 应用补丁
+          # 应用 LXC 补丁库内容
+          git clone --depth=1 https://github.com/wings110/8650-lxc-docker.git lxc_fix
           for p in ./lxc_fix/lxc-patches/*.patch; do
-            echo "-> 应用补丁: $p"
-            patch -p1 -F 3 < "$p" || true
+            patch -p1 -d common -F 3 < "$p" || true
           done
-          
-          # 创建安全修复脚本并执行
-          cat > lxc_fix/lxc-patches/sctp_source_fix_safe.sh << 'EOF'
-          #!/bin/bash
-          echo ">>> SCTP 源码安全修复..."
-          if [ -d "common/net/sctp" ] && [ -f "common/net/sctp/sysctl.c" ]; then
-              sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' common/net/sctp/sysctl.c 2>/dev/null || true
-              echo "✅ SCTP 修复应用"
-          else
-              echo "⚠️ 跳过 SCTP 修复（源码不存在）"
-          fi
-          EOF
-          chmod +x lxc_fix/lxc-patches/sctp_source_fix_safe.sh
-          
           cd common
-          bash ../lxc_fix/lxc-patches/sctp_source_fix_safe.sh
+          bash ../lxc_fix/lxc-patches/sctp_source_fix.sh || true
           
           # 写入 Config
           {
             echo "CONFIG_KSU=y"
-            if [[ "${{ github.event.inputs.better_net }}" == "true" ]]; then
-              echo "CONFIG_IP_SCTP=y"
-              echo "CONFIG_IP_SCTP_COOKIE_HMAC_MD5=y"
-            fi
+            [[ "${{ github.event.inputs.better_net }}" == "true" ]] && echo "CONFIG_IP_SCTP=y"
             echo "CONFIG_TMPFS_XATTR=y"
             echo "CONFIG_TMPFS_POSIX_ACL=y"
           } >> arch/arm64/configs/gki_defconfig
@@ -340,25 +287,22 @@ jobs:
       - name: 构建内核镜像 (常规流)
         if: inputs.vmlinux_debug == false
         run: |
-          cd ${{ env.WORKSPACE }}
-          export PATH="/usr/lib/ccache:$PWD/clang20/bin:$PWD/build-tools/bin:$PATH"
+          WORKDIR="$(pwd)"
+          export PATH="/usr/lib/ccache:$WORKDIR/kernel_workspace/clang20/bin:$WORKDIR/kernel_workspace/build-tools/bin:$PATH"
           export C_INCLUDE_PATH="/usr/include:/usr/include/x86_64-linux-gnu"
-          
-          cd common
-          make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            CC="ccache clang" O=out gki_defconfig
-          make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            CC="ccache clang" O=out Image
+          cd kernel_workspace/common
+          make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" O=out gki_defconfig
+          make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" O=out Image
 
       - name: 打包 AnyKernel3
         id: create_zip
         if: inputs.vmlinux_debug == false
         run: |
-          cd ${{ env.WORKSPACE }}
+          cd kernel_workspace
           git clone --depth=1 https://github.com/cctv18/AnyKernel3
           cp common/out/arch/arm64/boot/Image AnyKernel3/
           cd AnyKernel3
-          AK3_NAME="AnyKernel3_SCTP_LXC_${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}_${{ github.run_id }}.zip"
+          AK3_NAME="AnyKernel3_SCTP_LXC_${{ env.KERNEL_VERSION }}_${{ github.run_id }}.zip"
           zip -r ../$AK3_NAME ./*
           echo "ak3name=$AK3_NAME" >> $GITHUB_OUTPUT
 
@@ -367,7 +311,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: kernel-zip
-          path: ${{ env.WORKSPACE }}/*.zip
+          path: kernel_workspace/*.zip
 
   release:
     needs: build
@@ -385,6 +329,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "Build-${{ github.run_id }}" ./*.zip \
-            --title "欧加真 6.1.118 SCTP-LXC 加速版" \
-            --notes "包含 LXC/Docker 补丁与完整环境支持\n- 修复 SCTP 源码缺失问题\n- 优化补丁应用流程"
+          gh release create "Build-${{ github.run_id }}" ./*.zip --title "欧加真 6.1.118 SCTP-LXC 加速版" --notes "包含 LXC/Docker 补丁与完整环境支持"
