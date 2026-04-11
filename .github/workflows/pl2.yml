@@ -258,129 +258,19 @@ jobs:
           
           cd ${{ env.WORKSPACE }}
           
-          # 直接修复 SCTP 源码（不使用外部脚本，确保路径正确）
-          echo "========== 直接修复 SCTP 源码 =========="
-          cd common
-          echo "当前目录: $(pwd)"
-          
-          if [ -d "net/sctp" ]; then
-            echo "✅ 找到 net/sctp，开始修复..."
-            
-            # 修复所有 .c 文件中的指针引用
-            echo ">>> 修复指针引用..."
-            find net/sctp -name "*.c" -exec sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' {} \;
-            
-            # 修复头文件
-            if [ -f "include/net/sctp/structs.h" ]; then
-              echo ">>> 修复头文件..."
-              sed -i 's/struct netns_sctp \*sctp;/struct netns_sctp sctp;/g' include/net/sctp/structs.h 2>/dev/null || true
-            fi
-            
-            # 修复 sysctl.c
-            if [ -f "net/sctp/sysctl.c" ]; then
-              echo ">>> 修复 sysctl.c..."
-              sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' net/sctp/sysctl.c 2>/dev/null || true
-            fi
-            
-            # 修复 protocol.c
-            if [ -f "net/sctp/protocol.c" ]; then
-              echo ">>> 修复 protocol.c..."
-              sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' net/sctp/protocol.c 2>/dev/null || true
-            fi
-            
-            echo "✅ SCTP 修复完成"
-            
-            # ========== 完整验证所有 SCTP 文件 ==========
-            echo ""
-            echo "========== 完整验证 SCTP 修复结果 =========="
-            
-            # 统计修复的文件数量
-            FIXED_COUNT=$(grep -r "&net->sctp" net/sctp/ --include="*.c" 2>/dev/null | wc -l)
-            echo "包含 &net->sctp 的代码行数: $FIXED_COUNT"
-            
-            # 逐个检查主要文件
-            echo ""
-            echo "逐个文件检查:"
-            
-            # 检查 sysctl.c
-            if [ -f "net/sctp/sysctl.c" ]; then
-              if grep -q "&net->sctp" net/sctp/sysctl.c 2>/dev/null; then
-                echo "  ✅ sysctl.c - 已修复"
-              else
-                echo "  ⚠️ sysctl.c - 未修复"
-              fi
-            fi
-            
-            # 检查 protocol.c
-            if [ -f "net/sctp/protocol.c" ]; then
-              if grep -q "&net->sctp" net/sctp/protocol.c 2>/dev/null; then
-                echo "  ✅ protocol.c - 已修复"
-              else
-                echo "  ⚠️ protocol.c - 未修复"
-              fi
-            fi
-            
-            # 检查 socket.c
-            if [ -f "net/sctp/socket.c" ]; then
-              if grep -q "&net->sctp" net/sctp/socket.c 2>/dev/null; then
-                echo "  ✅ socket.c - 已修复"
-              else
-                echo "  ⚠️ socket.c - 未修复"
-              fi
-            fi
-            
-            # 检查 associola.c
-            if [ -f "net/sctp/associola.c" ]; then
-              if grep -q "&net->sctp" net/sctp/associola.c 2>/dev/null; then
-                echo "  ✅ associola.c - 已修复"
-              else
-                echo "  ⚠️ associola.c - 未修复（可能不需要修复）"
-              fi
-            fi
-            
-            # 检查 auth.c
-            if [ -f "net/sctp/auth.c" ]; then
-              if grep -q "&net->sctp" net/sctp/auth.c 2>/dev/null; then
-                echo "  ✅ auth.c - 已修复"
-              else
-                echo "  ⚠️ auth.c - 未修复（可能不需要修复）"
-              fi
-            fi
-            
-            # 检查 bind_addr.c
-            if [ -f "net/sctp/bind_addr.c" ]; then
-              if grep -q "&net->sctp" net/sctp/bind_addr.c 2>/dev/null; then
-                echo "  ✅ bind_addr.c - 已修复"
-              else
-                echo "  ⚠️ bind_addr.c - 未修复（可能不需要修复）"
-              fi
-            fi
-            
-            # 检查 chunk.c
-            if [ -f "net/sctp/chunk.c" ]; then
-              if grep -q "&net->sctp" net/sctp/chunk.c 2>/dev/null; then
-                echo "  ✅ chunk.c - 已修复"
-              else
-                echo "  ⚠️ chunk.c - 未修复（可能不需要修复）"
-              fi
-            fi
-            
-            # 检查头文件
-            if [ -f "include/net/sctp/structs.h" ]; then
-              if grep -q "struct netns_sctp sctp" include/net/sctp/structs.h 2>/dev/null; then
-                echo "  ✅ include/net/sctp/structs.h - 已修复"
-              else
-                echo "  ⚠️ include/net/sctp/structs.h - 未修复"
-              fi
-            fi
-            
-            echo ""
-            echo "✅ SCTP 完整验证完成"
-          else
-            echo "❌ net/sctp 不存在"
-          fi
-          
+          # ========== 执行 SCTP 源码修复脚本 ==========
+          echo "========== 执行 SCTP 源码修复脚本 =========="
           cd ${{ env.WORKSPACE }}
+          SCRIPT_PATH="./lxc_fix/lxc-patches/sctp_source_fix.sh"
+          
+          if [ -f "$SCRIPT_PATH" ]; then
+             echo "找到脚本，正在执行..."
+             sed -i 's/\r$//' "$SCRIPT_PATH"
+             bash "$SCRIPT_PATH"
+          else
+             echo "❌ 严重错误：未找到修复脚本 $SCRIPT_PATH"
+             exit 1
+          fi
           
           echo "========================================="
           echo ">>> 阶段 3/4：【补丁模式】提取结构体 (应用补丁后)"
@@ -533,138 +423,18 @@ jobs:
           
           cd ${{ env.WORKSPACE }}
           
-          # 直接修复 SCTP 源码（不使用外部脚本，确保路径正确）
-          echo "========== 6. 直接修复 SCTP 源码 =========="
+          # ========== 6. 执行 SCTP 源码修复脚本 ==========
+          echo "========== 6. 执行 SCTP 源码修复脚本 =========="
+          cd ${{ env.WORKSPACE }}
+          SCRIPT_PATH="./lxc_fix/lxc-patches/sctp_source_fix.sh"
           
-          # 验证 SCTP 目录存在
-          if [ ! -d "common/net/sctp" ]; then
-            echo "❌ common/net/sctp 不存在，跳过修复"
+          if [ -f "$SCRIPT_PATH" ]; then
+             echo "找到脚本，正在执行..."
+             sed -i 's/\r$//' "$SCRIPT_PATH"
+             bash "$SCRIPT_PATH"
           else
-            echo "✅ common/net/sctp 存在"
-            
-            # 进入 common 目录
-            cd common
-            echo "当前目录: $(pwd)"
-            
-            if [ -d "net/sctp" ]; then
-              echo "✅ 找到 net/sctp，开始修复..."
-              
-              # 修复所有 .c 文件中的指针引用
-              echo ">>> 修复指针引用..."
-              find net/sctp -name "*.c" -exec sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' {} \;
-              
-              # 修复头文件
-              if [ -f "include/net/sctp/structs.h" ]; then
-                echo ">>> 修复头文件..."
-                sed -i 's/struct netns_sctp \*sctp;/struct netns_sctp sctp;/g' include/net/sctp/structs.h 2>/dev/null || true
-              fi
-              
-              # 修复 sysctl.c
-              if [ -f "net/sctp/sysctl.c" ]; then
-                echo ">>> 修复 sysctl.c..."
-                sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' net/sctp/sysctl.c 2>/dev/null || true
-              fi
-              
-              # 修复 protocol.c
-              if [ -f "net/sctp/protocol.c" ]; then
-                echo ">>> 修复 protocol.c..."
-                sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' net/sctp/protocol.c 2>/dev/null || true
-              fi
-              
-              echo "✅ SCTP 修复完成"
-              
-              # ========== 完整验证所有 SCTP 文件 ==========
-              echo ""
-              echo "========== 完整验证 SCTP 修复结果 =========="
-              
-              # 统计修复的文件数量
-              FIXED_COUNT=$(grep -r "&net->sctp" net/sctp/ --include="*.c" 2>/dev/null | wc -l)
-              echo "包含 &net->sctp 的代码行数: $FIXED_COUNT"
-              
-              # 逐个检查主要文件
-              echo ""
-              echo "逐个文件检查:"
-              
-              # 检查 sysctl.c
-              if [ -f "net/sctp/sysctl.c" ]; then
-                if grep -q "&net->sctp" net/sctp/sysctl.c 2>/dev/null; then
-                  echo "  ✅ sysctl.c - 已修复"
-                else
-                  echo "  ⚠️ sysctl.c - 未修复"
-                fi
-              fi
-              
-              # 检查 protocol.c
-              if [ -f "net/sctp/protocol.c" ]; then
-                if grep -q "&net->sctp" net/sctp/protocol.c 2>/dev/null; then
-                  echo "  ✅ protocol.c - 已修复"
-                else
-                  echo "  ⚠️ protocol.c - 未修复"
-                fi
-              fi
-              
-              # 检查 socket.c
-              if [ -f "net/sctp/socket.c" ]; then
-                if grep -q "&net->sctp" net/sctp/socket.c 2>/dev/null; then
-                  echo "  ✅ socket.c - 已修复"
-                else
-                  echo "  ⚠️ socket.c - 未修复"
-                fi
-              fi
-              
-              # 检查 associola.c
-              if [ -f "net/sctp/associola.c" ]; then
-                if grep -q "&net->sctp" net/sctp/associola.c 2>/dev/null; then
-                  echo "  ✅ associola.c - 已修复"
-                else
-                  echo "  ⚠️ associola.c - 未修复（可能不需要修复）"
-                fi
-              fi
-              
-              # 检查 auth.c
-              if [ -f "net/sctp/auth.c" ]; then
-                if grep -q "&net->sctp" net/sctp/auth.c 2>/dev/null; then
-                  echo "  ✅ auth.c - 已修复"
-                else
-                  echo "  ⚠️ auth.c - 未修复（可能不需要修复）"
-                fi
-              fi
-              
-              # 检查 bind_addr.c
-              if [ -f "net/sctp/bind_addr.c" ]; then
-                if grep -q "&net->sctp" net/sctp/bind_addr.c 2>/dev/null; then
-                  echo "  ✅ bind_addr.c - 已修复"
-                else
-                  echo "  ⚠️ bind_addr.c - 未修复（可能不需要修复）"
-                fi
-              fi
-              
-              # 检查 chunk.c
-              if [ -f "net/sctp/chunk.c" ]; then
-                if grep -q "&net->sctp" net/sctp/chunk.c 2>/dev/null; then
-                  echo "  ✅ chunk.c - 已修复"
-                else
-                  echo "  ⚠️ chunk.c - 未修复（可能不需要修复）"
-                fi
-              fi
-              
-              # 检查头文件
-              if [ -f "include/net/sctp/structs.h" ]; then
-                if grep -q "struct netns_sctp sctp" include/net/sctp/structs.h 2>/dev/null; then
-                  echo "  ✅ include/net/sctp/structs.h - 已修复"
-                else
-                  echo "  ⚠️ include/net/sctp/structs.h - 未修复"
-                fi
-              fi
-              
-              echo ""
-              echo "✅ SCTP 完整验证完成"
-            else
-              echo "❌ net/sctp 不存在"
-            fi
-            
-            # 回到工作区根目录
-            cd ${{ env.WORKSPACE }}
+             echo "❌ 严重错误：未找到修复脚本 $SCRIPT_PATH"
+             exit 1
           fi
           
           # 写入 Config
