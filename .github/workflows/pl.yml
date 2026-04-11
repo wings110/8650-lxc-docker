@@ -1,4 +1,4 @@
-name: sctp纯净+补丁加速版构建 6.1.118 欧加真OKI内核
+name: 000sctp-new加速版构建 6.1.118 欧加真OKI内核
 
 env:
   TZ: Asia/Shanghai
@@ -23,7 +23,7 @@ on:
           - 'ksu'
           - 'none'
       vmlinux_debug:
-        description: '【云端 ABI 排雷】包含补丁后的结构体差异对比报告 (不打包刷机包)'
+        description: '【云端 ABI 排雷】进行纯净组与补丁组的 2x2 正交结构体对比 (跳过普通刷机包打包)'
         required: true
         type: boolean
         default: false
@@ -61,7 +61,7 @@ on:
           - 'true'
           - 'default'
       better_net:
-        description: '是否开启网络功能拓展配置 (开启 SCTP)'
+        description: '是否开启网络功能拓展配置 (包含开启 SCTP)'
         required: true
         type: boolean
         default: true
@@ -135,8 +135,8 @@ jobs:
           rm common/android/abi_gki_protected_exports_* || true
           sed -i 's/ -dirty//g' common/scripts/setlocalversion
 
-      # ================== 核心升级：包含补丁的 ABI 排雷逻辑 ==================
-      - name: 【云端 ABI 排雷】补丁前后对比
+      # ================== 核心升级：控制变量法 2x2 正交排雷 ==================
+      - name: 【云端 ABI 排雷】纯净组与补丁组双向对比
         if: inputs.vmlinux_debug == true
         run: |
           WORKDIR="$(pwd)"
@@ -146,43 +146,86 @@ jobs:
           cd kernel_workspace
           MAKE_CMD="make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang O=out"
           
-          echo ">>> 1. 提取【纯净组】结构体状态..."
+          echo "========================================="
+          echo ">>> 阶段 1/4：【纯净模式】提取结构体 (不打任何补丁)"
+          echo "========================================="
           cd common
-          $MAKE_CMD gki_defconfig && $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
-          pahole -C net out/net/core/net_namespace.o > ../net_clean.txt
-          pahole -C sk_buff out/net/core/skbuff.o > ../skb_clean.txt
           
-          echo ">>> 2. 应用所有补丁与 LXC 配置..."
+          # 1.1 纯净模式：SCTP OFF
+          echo ">>> 1.1 正在编译 纯净组 (SCTP OFF)..."
+          sed -i '/CONFIG_IP_SCTP/d' arch/arm64/configs/gki_defconfig
+          echo "# CONFIG_IP_SCTP is not set" >> arch/arm64/configs/gki_defconfig
+          $MAKE_CMD gki_defconfig && $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
+          pahole -C net out/net/core/net_namespace.o > ../net_clean_sctp_off.txt
+          pahole -C sk_buff out/net/core/skbuff.o > ../skb_clean_sctp_off.txt
+          
+          # 1.2 纯净模式：SCTP ON
+          echo ">>> 1.2 正在编译 纯净组 (SCTP ON)..."
+          sed -i '/CONFIG_IP_SCTP/d' arch/arm64/configs/gki_defconfig
+          echo "CONFIG_IP_SCTP=y" >> arch/arm64/configs/gki_defconfig
+          $MAKE_CMD gki_defconfig && $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
+          pahole -C net out/net/core/net_namespace.o > ../net_clean_sctp_on.txt
+          pahole -C sk_buff out/net/core/skbuff.o > ../skb_clean_sctp_on.txt
+          
+          echo "========================================="
+          echo ">>> 阶段 2/4：【应用补丁】打入 LXC/Docker 修复"
+          echo "========================================="
           cd ..
           git clone --depth=1 https://github.com/wings110/8650-lxc-docker.git lxc_fix
-          # 应用所有补丁库中的 .patch 文件
+          # 应用所有 .patch 文件
           for p in ./lxc_fix/lxc-patches/*.patch; do
-            echo "正在应用补丁: $p"
+            echo "-> 应用补丁: $p"
             patch -p1 -d common -F 3 < "$p" || true
           done
-          
+          # 执行 SCTP 源码专项修复脚本
           cd common
-          # 开启 SCTP 等配置
-          echo "CONFIG_IP_SCTP=y" >> arch/arm64/configs/gki_defconfig
-          # 执行关键源码修复脚本
           bash ../lxc_fix/lxc-patches/sctp_source_fix.sh || true
           
-          echo ">>> 3. 提取【补丁后】结构体状态..."
-          $MAKE_CMD gki_defconfig && $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
-          pahole -C net out/net/core/net_namespace.o > ../net_patched.txt
-          pahole -C sk_buff out/net/core/skbuff.o > ../skb_patched.txt
+          echo "========================================="
+          echo ">>> 阶段 3/4：【补丁模式】提取结构体 (应用补丁后)"
+          echo "========================================="
           
-          echo ">>> 4. 生成对比报告..."
+          # 3.1 补丁模式：SCTP OFF
+          echo ">>> 3.1 正在编译 补丁组 (SCTP OFF)..."
+          sed -i '/CONFIG_IP_SCTP/d' arch/arm64/configs/gki_defconfig
+          echo "# CONFIG_IP_SCTP is not set" >> arch/arm64/configs/gki_defconfig
+          $MAKE_CMD gki_defconfig && $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
+          pahole -C net out/net/core/net_namespace.o > ../net_patched_sctp_off.txt
+          pahole -C sk_buff out/net/core/skbuff.o > ../skb_patched_sctp_off.txt
+          
+          # 3.2 补丁模式：SCTP ON
+          echo ">>> 3.2 正在编译 补丁组 (SCTP ON)..."
+          sed -i '/CONFIG_IP_SCTP/d' arch/arm64/configs/gki_defconfig
+          echo "CONFIG_IP_SCTP=y" >> arch/arm64/configs/gki_defconfig
+          $MAKE_CMD gki_defconfig && $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
+          pahole -C net out/net/core/net_namespace.o > ../net_patched_sctp_on.txt
+          pahole -C sk_buff out/net/core/skbuff.o > ../skb_patched_sctp_on.txt
+          
+          echo "========================================="
+          echo ">>> 阶段 4/4：生成全方位综合对比报告"
+          echo "========================================="
           cd ..
-          diff -u net_clean.txt net_patched.txt > abi_diff_net_report.txt || true
-          diff -u skb_clean.txt skb_patched.txt > abi_diff_skb_report.txt || true
+          
+          # 分析 1：纯净源码下，单独开启 SCTP 会导致什么变化？
+          diff -u net_clean_sctp_off.txt net_clean_sctp_on.txt > diff_1_clean_sctp_off_vs_on_net.txt || true
+          diff -u skb_clean_sctp_off.txt skb_clean_sctp_on.txt > diff_1_clean_sctp_off_vs_on_skb.txt || true
+          
+          # 分析 2：打入补丁后，开启/关闭 SCTP 会导致什么变化？
+          diff -u net_patched_sctp_off.txt net_patched_sctp_on.txt > diff_2_patched_sctp_off_vs_on_net.txt || true
+          diff -u skb_patched_sctp_off.txt skb_patched_sctp_on.txt > diff_2_patched_sctp_off_vs_on_skb.txt || true
+          
+          # 分析 3：(附加题) 同样是开启 SCTP，纯净源码和打补丁之后的结构体有什么区别？(看穿补丁对 ABI 的影响)
+          diff -u net_clean_sctp_on.txt net_patched_sctp_on.txt > diff_3_sctp_on_clean_vs_patched_net.txt || true
+          diff -u skb_clean_sctp_on.txt skb_patched_sctp_on.txt > diff_3_sctp_on_clean_vs_patched_skb.txt || true
+          
           zip abi_analysis_reports.zip *.txt
+          echo "✅ 2x2 正交结构体分析提取完成！"
 
       - name: 上传排雷分析
         if: inputs.vmlinux_debug == true
         uses: actions/upload-artifact@v4
         with:
-          name: abi_analysis_reports
+          name: abi_analysis_reports_full_matrix
           path: kernel_workspace/abi_analysis_reports.zip
 
       # ================== 以下为常规构建 (当 debug 为 false 时运行) ==================
@@ -215,7 +258,7 @@ jobs:
         id: ksu_version
         run: |
           cd kernel_workspace
-          # KSU 安装 (复用你 111.yml 的逻辑)
+          # KSU 安装
           if [[ ${{ github.event.inputs.ksu_type }} == "resukisu" ]]; then
             curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/refs/heads/main/kernel/setup.sh" | bash -s main
             echo "ksuver=ReSukiSU" >> $GITHUB_OUTPUT
@@ -285,4 +328,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "Build-${{ github.run_id }}" ./*.zip --title "欧加真 6.1.118 SCTP-LXC 加速版" --notes "包含 LXC/Docker 补丁与 SCTP 支持"
+          gh release create "Build-${{ github.run_id }}" ./*.zip --title "欧加真 6.1.118 SCTP-LXC 加速版" --notes "包含 LXC/Docker 补丁与完整环境支持"
