@@ -1,4 +1,4 @@
-name: 11223344sctp-new加速版构建 6.1.118 欧加真OKI内核
+name: sctp-new加速版构建 6.1.118 欧加真OKI内核
 
 env:
   TZ: Asia/Shanghai
@@ -107,20 +107,22 @@ jobs:
       actions: write
       contents: read
     steps:
-      - name: 清理磁盘空间 (参考fastbuild配置)
+      - name: 终极磁盘空间清理 (释放超 30GB 空间)
         run: |
-          echo "========== 开始清理系统无用依赖 =========="
-          sudo apt-mark hold firefox || true
-          sudo apt-mark hold libc-bin || true
-          sudo apt purge -y man-db || true
-          sudo rm -rf /var/lib/man-db/auto-update
-          
-          # 清除占用空间极大的预置环境
+          echo "========== 开始极致清理系统无用依赖 =========="
+          # 删除极其占空间的预装环境，为庞大的内核编译和 Ccache 腾出绝对充足的空间
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
           sudo rm -rf /opt/hostedtoolcache/CodeQL
-          
+          sudo rm -rf /usr/lib/jvm
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/.ghcup
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/local/share/chromium
+          # 清理 apt 缓存与 Docker 镜像
+          sudo apt-get clean
+          sudo docker image prune --all --force
           echo "========== 磁盘空间清理完成 =========="
           df -h
 
