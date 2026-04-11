@@ -215,57 +215,72 @@ jobs:
           echo "========== 克隆补丁仓库 =========="
           git clone --depth=1 https://github.com/wings110/8650-lxc-docker.git lxc_fix
           
-          echo "========== lxc_fix/lxc-patches 目录内容 =========="
-          ls -la lxc_fix/lxc-patches/
+          # ========== 诊断 lxc-patches 目录内容 ==========
+          echo "========== 诊断 lxc-patches 目录内容 =========="
+          if [ -d "lxc_fix" ]; then
+            echo "✅ lxc_fix 目录存在"
+            echo "========== lxc_fix 根目录内容 =========="
+            ls -la lxc_fix/
+            
+            if [ -d "lxc_fix/lxc-patches" ]; then
+              echo "========== lxc_fix/lxc-patches 目录内容 =========="
+              ls -la lxc_fix/lxc-patches/
+              
+              echo "========== 详细列出所有文件 =========="
+              ls -la lxc_fix/lxc-patches/ | cat
+              
+              echo "========== 只列出 .patch 文件 =========="
+              ls -la lxc_fix/lxc-patches/*.patch 2>/dev/null || echo "没有 .patch 文件"
+              
+              echo "========== 只列出 .sh 文件 =========="
+              ls -la lxc_fix/lxc-patches/*.sh 2>/dev/null || echo "没有 .sh 文件"
+              
+              echo "========== 列出所有文件类型 =========="
+              find lxc_fix/lxc-patches/ -type f -exec file {} \;
+            else
+              echo "❌ lxc_fix/lxc-patches 目录不存在"
+            fi
+            
+            echo "========== 检查 lxc_fix 根目录的 .sh 文件 =========="
+            find lxc_fix/ -name "*.sh" -type f 2>/dev/null || echo "没有找到 .sh 文件"
+          else
+            echo "❌ lxc_fix 目录不存在"
+          fi
           
           # 将 lxc-patches 里的所有文件移动到根目录
           echo "正在移动补丁文件到根目录..."
-          echo "移动前文件列表:"
-          ls -la ./*.patch ./*.sh 2>/dev/null || echo "暂无"
+          if [ -d "lxc_fix/lxc-patches" ]; then
+            mv lxc_fix/lxc-patches/* ./ 2>/dev/null || true
+            echo "移动完成"
+          else
+            echo "⚠️ lxc_fix/lxc-patches 目录不存在，跳过移动"
+          fi
           
-          mv lxc_fix/lxc-patches/* ./
-          
-          echo "移动后文件列表:"
-          ls -la ./*.patch ./*.sh 2>/dev/null || echo "无文件"
-          
-          # 应用所有 .patch 文件（现在在工作区根目录）
+          # 应用所有 .patch 文件
           echo "========== 应用补丁 =========="
           for p in ./*.patch; do
             if [ -f "$p" ]; then
               echo "-> 应用补丁: $p"
               patch -p1 -F 3 < "$p" || true
-            else
-              echo "⚠️ 未找到补丁文件: $p"
             fi
           done
           
-          # 执行 SCTP 修复脚本
-          echo "========== 执行 SCTP 修复脚本 =========="
+          # 检查是否需要执行 SCTP 脚本
+          echo "========== 检查 SCTP 脚本 =========="
           if [ -f "./sctp_source_fix_safe.sh" ]; then
-            echo "✅ 找到脚本: sctp_source_fix_safe.sh"
-            chmod +x ./sctp_source_fix_safe.sh
-            cd common
-            echo "当前目录: $(pwd)"
-            echo "执行: bash ../sctp_source_fix_safe.sh"
-            bash ../sctp_source_fix_safe.sh
-          elif [ -f "lxc_fix/lxc-patches/sctp_source_fix_safe.sh" ]; then
-            echo "✅ 在原目录找到脚本，复制到根目录"
-            cp lxc_fix/lxc-patches/sctp_source_fix_safe.sh ./
+            echo "✅ 找到脚本，执行中..."
             chmod +x ./sctp_source_fix_safe.sh
             cd common
             bash ../sctp_source_fix_safe.sh
+            cd ${{ env.WORKSPACE }}
           else
-            echo "❌ 错误: 找不到 sctp_source_fix_safe.sh"
-            echo "查找所有 .sh 文件:"
-            find . -name "*.sh" -type f
-            exit 1
+            echo "⚠️ sctp_source_fix_safe.sh 不存在，跳过（补丁已包含修复）"
           fi
           
           echo "========================================="
           echo ">>> 阶段 3/4：【补丁模式】提取结构体 (应用补丁后)"
           echo "========================================="
           
-          # 回到 common 目录（如果不在的话）
           cd ${{ env.WORKSPACE }}/common
           
           # 3.1 补丁模式：SCTP OFF
@@ -362,10 +377,9 @@ jobs:
           fi
           
           echo "========== 2. KSU 安装后目录状态 =========="
-          pwd
           ls -la
           
-          # 克隆补丁仓库（如果还未克隆）
+          # 克隆补丁仓库
           echo "========== 3. 克隆补丁仓库 =========="
           if [ ! -d "lxc_fix" ]; then
             echo "-> 克隆仓库到 lxc_fix 目录..."
@@ -375,116 +389,83 @@ jobs:
             echo "-> lxc_fix 目录已存在"
           fi
           
-          echo "========== 4. lxc_fix 目录内容 =========="
-          ls -la lxc_fix/
-          echo "========== 5. lxc_fix/lxc-patches 目录内容 =========="
-          ls -la lxc_fix/lxc-patches/
+          # ========== 诊断 lxc-patches 目录内容 ==========
+          echo "========== 4. 诊断 lxc-patches 目录内容 =========="
+          if [ -d "lxc_fix" ]; then
+            echo "✅ lxc_fix 目录存在"
+            echo "========== lxc_fix 根目录内容 =========="
+            ls -la lxc_fix/
+            
+            if [ -d "lxc_fix/lxc-patches" ]; then
+              echo "========== lxc_fix/lxc-patches 目录内容 =========="
+              ls -la lxc_fix/lxc-patches/
+              
+              echo "========== 详细列出所有文件 =========="
+              ls -la lxc_fix/lxc-patches/ | cat
+              
+              echo "========== 只列出 .patch 文件 =========="
+              ls -la lxc_fix/lxc-patches/*.patch 2>/dev/null || echo "没有 .patch 文件"
+              
+              echo "========== 只列出 .sh 文件 =========="
+              ls -la lxc_fix/lxc-patches/*.sh 2>/dev/null || echo "没有 .sh 文件"
+              
+              echo "========== 列出所有文件类型 =========="
+              find lxc_fix/lxc-patches/ -type f -exec file {} \;
+            else
+              echo "❌ lxc_fix/lxc-patches 目录不存在"
+            fi
+            
+            echo "========== 检查 lxc_fix 根目录的 .sh 文件 =========="
+            find lxc_fix/ -name "*.sh" -type f 2>/dev/null || echo "没有找到 .sh 文件"
+          else
+            echo "❌ lxc_fix 目录不存在"
+          fi
           
-          # 将 lxc-patches 里的所有文件移动到根目录
-          echo "========== 6. 移动补丁文件到根目录 =========="
-          echo "-> 移动前根目录文件列表:"
-          ls -la *.patch *.sh 2>/dev/null || echo "   暂无 .patch 或 .sh 文件"
-          
-          echo "-> 执行移动: mv lxc_fix/lxc-patches/* ./"
-          mv lxc_fix/lxc-patches/* ./
-          echo "-> 移动完成"
-          
-          echo "========== 7. 移动后根目录文件列表 =========="
-          ls -la
-          echo "========== 8. 专门列出 .patch 和 .sh 文件 =========="
-          echo "补丁文件:"
-          ls -la *.patch 2>/dev/null || echo "   未找到 .patch 文件"
-          echo "脚本文件:"
-          ls -la *.sh 2>/dev/null || echo "   未找到 .sh 文件"
+          # 移动补丁文件到根目录
+          echo "========== 5. 移动补丁文件到根目录 =========="
+          if [ -d "lxc_fix/lxc-patches" ]; then
+            echo "移动前根目录文件列表:"
+            ls -la *.patch *.sh 2>/dev/null || echo "暂无"
+            
+            mv lxc_fix/lxc-patches/* ./ 2>/dev/null || true
+            
+            echo "移动后根目录文件列表:"
+            ls -la *.patch *.sh 2>/dev/null || echo "无文件"
+          else
+            echo "⚠️ lxc_fix/lxc-patches 目录不存在，跳过移动"
+          fi
           
           # 应用所有 .patch 文件
-          echo "========== 9. 应用补丁 =========="
+          echo "========== 6. 应用补丁 =========="
           for p in ./*.patch; do
             if [ -f "$p" ]; then
-              echo "-> 正在应用补丁: $p"
+              echo "-> 应用补丁: $p"
               patch -p1 -F 3 < "$p" || true
-              echo "-> 补丁应用完成: $p"
-            else
-              echo "⚠️ 未找到补丁文件: $p"
             fi
           done
           
-          # 执行 SCTP 修复脚本
-          echo "========== 10. 执行 SCTP 修复脚本 =========="
-          echo "-> 检查根目录下的 .sh 文件:"
-          ls -la *.sh 2>/dev/null || echo "   未找到任何 .sh 文件"
-          
-          # 查找可能的脚本文件名
-          echo "-> 查找所有可能的 SCTP 修复脚本:"
-          find . -name "sctp*.sh" -type f 2>/dev/null || echo "   未找到 sctp 相关脚本"
-          find . -name "*fix*.sh" -type f 2>/dev/null || echo "   未找到 fix 相关脚本"
-          
+          # 检查并执行 SCTP 脚本
+          echo "========== 7. 检查 SCTP 脚本 =========="
           if [ -f "./sctp_source_fix_safe.sh" ]; then
-            echo "✅ 找到脚本: sctp_source_fix_safe.sh"
-            echo "-> 脚本内容预览:"
-            head -30 ./sctp_source_fix_safe.sh
-            
-            echo "-> 赋予执行权限..."
+            echo "✅ 找到脚本: sctp_source_fix_safe.sh，执行中..."
             chmod +x ./sctp_source_fix_safe.sh
-            
-            echo "-> 进入 common 目录..."
             cd common
-            echo "-> 当前目录: $(pwd)"
-            
-            echo "-> 执行前检查 SCTP 目录:"
+            echo "当前目录: $(pwd)"
+            echo "执行前检查 SCTP 目录:"
             if [ -d "net/sctp" ]; then
-              echo "   ✅ net/sctp 存在"
-              ls -la net/sctp/ | head -5
+              echo "  ✅ net/sctp 存在"
             else
-              echo "   ❌ net/sctp 不存在"
+              echo "  ❌ net/sctp 不存在"
             fi
-            
-            if [ -d "include/net/sctp" ]; then
-              echo "   ✅ include/net/sctp 存在"
-            else
-              echo "   ❌ include/net/sctp 不存在"
-            fi
-            
-            echo "-> 执行: bash ../sctp_source_fix_safe.sh"
-            bash ../sctp_source_fix_safe.sh
-            
-            echo "-> 脚本执行完成"
-            
-            # 验证修复结果
-            echo "-> 验证修复结果:"
-            if grep -q "&net->sctp" net/sctp/sysctl.c 2>/dev/null; then
-              echo "   ✅ sysctl.c 已修复"
-            else
-              echo "   ⚠️ sysctl.c 可能未修复"
-            fi
-            
-            # 回到工作区根目录
-            cd ${{ env.WORKSPACE }}
-          elif [ -f "../sctp_source_fix_safe.sh" ]; then
-            echo "✅ 在上一级目录找到脚本: ../sctp_source_fix_safe.sh"
-            cd common
-            bash ../sctp_source_fix_safe.sh
-            cd ${{ env.WORKSPACE }}
-          elif [ -f "lxc_fix/lxc-patches/sctp_source_fix_safe.sh" ]; then
-            echo "✅ 在原目录找到脚本: lxc_fix/lxc-patches/sctp_source_fix_safe.sh"
-            cp lxc_fix/lxc-patches/sctp_source_fix_safe.sh ./
-            chmod +x ./sctp_source_fix_safe.sh
-            cd common
             bash ../sctp_source_fix_safe.sh
             cd ${{ env.WORKSPACE }}
           else
-            echo "❌ 错误: 找不到 sctp_source_fix_safe.sh 脚本"
-            echo "========== 完整搜索所有 sctp 相关文件 =========="
-            find . -name "*sctp*" -type f 2>/dev/null
-            echo "========== 完整搜索所有 .sh 文件 =========="
-            find . -name "*.sh" -type f 2>/dev/null
-            echo "========== 当前目录完整列表 =========="
-            ls -laR
-            exit 1
+            echo "⚠️ sctp_source_fix_safe.sh 不存在"
+            echo "补丁 sctp_abi_fix.patch 已包含 SCTP 修复，无需额外脚本"
           fi
           
           # 写入 Config
-          echo "========== 11. 写入内核配置 =========="
+          echo "========== 8. 写入内核配置 =========="
           {
             echo "CONFIG_KSU=y"
             if [[ "${{ github.event.inputs.better_net }}" == "true" ]]; then
@@ -494,7 +475,7 @@ jobs:
             echo "CONFIG_TMPFS_POSIX_ACL=y"
           } >> common/arch/arm64/configs/gki_defconfig
           
-          echo "========== 12. 验证内核配置 =========="
+          echo "========== 9. 验证内核配置 =========="
           grep -E "CONFIG_KSU|CONFIG_IP_SCTP|CONFIG_TMPFS" common/arch/arm64/configs/gki_defconfig || true
           
           echo "✅ KernelSU/SUSFS/补丁添加完成"
@@ -549,4 +530,4 @@ jobs:
         run: |
           gh release create "Build-${{ github.run_id }}" ./*.zip \
             --title "欧加真 6.1.118 SCTP-LXC 加速版" \
-            --notes "包含 LXC/Docker 补丁与完整环境支持\n- 修复 SCTP 源码缺失问题（改用 git clone）\n- 优化补丁应用流程（补丁文件移至根目录）\n- 添加详细日志输出便于调试"
+            --notes "包含 LXC/Docker 补丁与完整环境支持\n- 修复 SCTP 源码缺失问题（改用 git clone）\n- 优化补丁应用流程\n- 添加详细目录诊断日志"
