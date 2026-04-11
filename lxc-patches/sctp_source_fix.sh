@@ -10,10 +10,18 @@ elif [ ! -d "net/sctp" ]; then
 fi
 
 # =========================================================
-# 1. 终极替换魔法：使用 Perl 正则引擎，一击秒杀所有 ->sctp 引用
-# 无论是 net->sctp, (net)->sctp, 还是 &sock_net(sk)->sctp.xxx 都能完美替换！
+# 1. 极度精准的 Perl 三重替换魔法 (绝不误伤任何外部宏或函数)
 # =========================================================
-find net/sctp include/net/sctp -type f -name "*.[ch]" -exec perl -pi -e 's/([a-zA-Z0-9_()\[\]>.-]+)->sctp\b/net_sctp($1)/g' {} +
+find net/sctp include/net/sctp -type f -name "*.[ch]" -exec perl -pi -e '
+    # 规则 1: 仅匹配已知的、返回 net 指针的函数 (如 sock_net(sk)->sctp)
+    s/\b(sock_net|dev_net|read_pnet|pnet)\(([^)]+)\)->sctp\b/net_sctp($1($2))/g;
+
+    # 规则 2: 匹配被括号严格包裹的指针 (如 (net)->sctp )
+    s/\(\s*([a-zA-Z0-9_]+(?:(?:->|\.)[a-zA-Z0-9_]+)*)\s*\)->sctp\b/net_sctp(($1))/g;
+
+    # 规则 3: 匹配最常规的纯净变量和属性链 (如 net->sctp 或 ep->base.net->sctp )
+    s/\b([a-zA-Z0-9_]+(?:(?:->|\.)[a-zA-Z0-9_]+)*)->sctp\b/net_sctp($1)/g;
+' {} +
 
 # =========================================================
 # 2. sysctl.c 专属高危排雷 (修复 container_of 反向指针寻址崩溃)
@@ -30,7 +38,7 @@ sed -i 's/struct netns_sctp \*sctp;/struct netns_sctp sctp;/g' include/net/sctp/
 echo "✅ 源码引用重构完毕！所有指标已对接至 net_ext！"
 
 # =========================================================
-# 打印战报：看看这次成功修改了多少文件
+# 打印战报
 # =========================================================
 echo "========== 🛠️ 以下是本次被成功修改的 SCTP 源码文件清单 =========="
 git diff --name-only net/sctp include/net/sctp
