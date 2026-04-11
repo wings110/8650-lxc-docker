@@ -119,17 +119,15 @@ jobs:
           remove-codeql: 'true'
           remove-large-packages: 'true'
 
-      - name: 额外激进清理磁盘（借鉴成功经验）
+      - name: 额外激进清理磁盘
         run: |
           echo "========== 开始激进清理 =========="
           
-          # 锁定并删除不必要的包
           sudo apt-mark hold firefox || true
           sudo apt-mark hold libc-bin || true
           sudo apt purge -y man-db || true
           sudo rm -rf /var/lib/man-db/auto-update
           
-          # 删除大型预装软件
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
@@ -142,176 +140,157 @@ jobs:
           sudo rm -rf /opt/az
           sudo rm -rf /usr/share/az_
           
-          # 清理包管理器缓存
           sudo apt clean
           sudo apt autoclean
           sudo apt autoremove --purge -y
           sudo rm -rf /var/lib/apt/lists/*
           sudo rm -rf /var/cache/apt/archives/*.deb
           
-          # 清理日志和临时文件
           sudo journalctl --vacuum-size=10M
           sudo rm -rf /tmp/* /var/tmp/*
           rm -rf ~/.cache/* ~/.npm ~/.cargo ~/.rustup ~/.local/share/pip
           
-          # 清理 Docker 残留
           sudo rm -rf /var/lib/docker || true
           sudo rm -rf /var/lib/containerd || true
           
-          # 清理 Python 缓存
           sudo find / -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
           
           echo "========== 清理完成 =========="
           df -h
           FREE_GB=$(df / | awk 'NR==2 {print int($4/1024/1024)}')
           echo "可用空间: ${FREE_GB}GB"
-          
-          if [ $FREE_GB -lt 10 ]; then
-            echo "警告: 剩余空间不足 10GB"
-          fi
 
       - name: 安装环境依赖+初始化源码
         run: |
-          # 创建工作目录
           mkdir -p ${{ env.WORKSPACE }}
           cd ${{ env.WORKSPACE }}
           
           sudo apt update && sudo apt install -y --no-install-recommends \
             binutils python-is-python3 libssl-dev libelf-dev zstd dwarves zip \
-            pkg-config aria2 ccache patch
+            pkg-config aria2 ccache patch tree
           
-          # 检查磁盘空间
           echo "========== 磁盘空间检查 =========="
           df -h
           
-          # 并行克隆加速
           aria2c -s16 -x16 https://github.com/cctv18/android_kernel_common_oneplus_sm8650/archive/refs/heads/oneplus/sm8650_b_16.0.0_oneplus12.zip -o common.zip &
           aria2c -s16 -x16 https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang20-r547379/clang-r547379.zip -o clang.zip &
           aria2c -s16 -x16 https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang20-r547379/build-tools.zip -o build-tools.zip &
           wait
           
-          unzip -q common.zip && mv android_kernel_common_oneplus_sm8650-* common
+          unzip -q common.zip
+          EXTRACTED_DIR=$(ls -d android_kernel_common_oneplus_sm8650-* 2>/dev/null | head -1)
+          echo "解压后的目录: $EXTRACTED_DIR"
+          
+          # 处理可能的嵌套结构
+          if [ -d "$EXTRACTED_DIR/common" ]; then
+            echo "检测到嵌套结构，正在修复..."
+            mkdir -p common
+            cp -r $EXTRACTED_DIR/common/* common/
+          else
+            echo "标准结构，直接移动..."
+            mv $EXTRACTED_DIR common
+          fi
+          
           mkdir -p clang20 && unzip -q clang.zip -d clang20
           unzip -q build-tools.zip
           rm -rf *.zip
           
-          # 净化源码
           rm common/android/abi_gki_protected_exports_* || true
           sed -i 's/ -dirty//g' common/scripts/setlocalversion
           
           echo "========== 源码准备完成 =========="
-          ls -la
+          ls -la common/ | head -20
 
-      # ================== 核心升级：控制变量法 2x2 正交排雷 ==================
-      - name: 【云端 ABI 排雷】纯净组与补丁组双向对比
-        if: inputs.vmlinux_debug == true
+      # ================== 新增：诊断 SCTP 源码位置 ==================
+      - name: 诊断 SCTP 源码位置
         run: |
           cd ${{ env.WORKSPACE }}
-          export PATH="/usr/lib/ccache:$PWD/clang20/bin:$PWD/build-tools/bin:$PATH"
-          export C_INCLUDE_PATH="/usr/include:/usr/include/x86_64-linux-gnu"
+          echo "========== 当前工作目录 =========="
+          pwd
           
-          MAKE_CMD="make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang O=out"
+          echo "========== 查找所有 sctp 目录 =========="
+          find . -type d -name "sctp" 2>/dev/null
           
-          echo "========================================="
-          echo ">>> 阶段 1/4：【纯净模式】提取结构体 (不打任何补丁)"
-          echo "========================================="
-          cd common
+          echo "========== common 目录结构 =========="
+          ls -la common/
           
-          # 1.1 纯净模式：SCTP OFF
-          echo ">>> 1.1 正在编译 纯净组 (SCTP OFF)..."
-          sed -i '/CONFIG_IP_SCTP/d' arch/arm64/configs/gki_defconfig
-          echo "# CONFIG_IP_SCTP is not set" >> arch/arm64/configs/gki_defconfig
-          $MAKE_CMD gki_defconfig && $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
-          pahole -C net out/net/core/net_namespace.o > ../net_clean_sctp_off.txt
-          pahole -C sk_buff out/net/core/skbuff.o > ../skb_clean_sctp_off.txt
+          echo "========== common 下的 net 目录 =========="
+          if [ -d "common/net" ]; then
+            ls -la common/net/ | head -20
+          else
+            echo "common/net 目录不存在！"
+            echo "正在查找 net 目录..."
+            find common -type d -name "net" 2>/dev/null
+          fi
           
-          # 1.2 纯净模式：SCTP ON
-          echo ">>> 1.2 正在编译 纯净组 (SCTP ON)..."
-          sed -i '/CONFIG_IP_SCTP/d' arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SCTP=y" >> arch/arm64/configs/gki_defconfig
-          $MAKE_CMD gki_defconfig && $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
-          pahole -C net out/net/core/net_namespace.o > ../net_clean_sctp_on.txt
-          pahole -C sk_buff out/net/core/skbuff.o > ../skb_clean_sctp_on.txt
+          echo "========== 检查是否有嵌套 common =========="
+          if [ -d "common/common" ]; then
+            echo "❌ 发现嵌套的 common 目录！"
+            ls -la common/common/
+            echo "实际 SCTP 可能在这里:"
+            find common/common -type d -name "sctp" 2>/dev/null
+          fi
           
-          echo "========================================="
-          echo ">>> 阶段 2/4：【应用补丁】打入 LXC/Docker 修复"
-          echo "========================================="
+          echo "========== 搜索 sysctl.c 文件 =========="
+          find . -name "sysctl.c" 2>/dev/null | grep -E "(sctp|net)" | head -10
+          
+          echo "========== 使用 tree 查看目录结构（前3层） =========="
+          tree -L 3 common/ 2>/dev/null || echo "tree 命令不可用，跳过"
+          
+          echo "========== 检查 gki_defconfig 中的 SCTP 配置 =========="
+          grep -i "sctp" common/arch/arm64/configs/gki_defconfig 2>/dev/null || echo "未找到 SCTP 配置"
+
+      - name: 克隆 LXC 补丁仓库
+        run: |
+          cd ${{ env.WORKSPACE }}
+          git clone --depth=1 https://github.com/wings110/8650-lxc-docker.git lxc_fix
+
+      - name: 应用 LXC 补丁
+        run: |
           cd ${{ env.WORKSPACE }}
           
-          git clone --depth=1 https://github.com/wings110/8650-lxc-docker.git lxc_fix
-          
-          # 应用所有 .patch 文件
           for p in ./lxc_fix/lxc-patches/*.patch; do
             echo "-> 应用补丁: $p"
             patch -p1 -F 3 < "$p" || true
           done
+
+      - name: 创建安全的 SCTP 修复脚本
+        run: |
+          cd ${{ env.WORKSPACE }}
           
-          # 创建安全的 sctp 修复脚本
           cat > lxc_fix/lxc-patches/sctp_source_fix_safe.sh << 'SCRIPT_EOF'
           #!/bin/bash
           echo ">>> 正在外科手术式修复 SCTP 核心源码引用（安全模式）..."
           
-          if [ ! -d "common/net/sctp" ]; then
-              echo "⚠️ 警告: SCTP 源码目录不存在，跳过 SCTP 源码修复"
+          # 查找实际的 sctp 目录
+          SCTP_DIR=$(find . -type d -name "sctp" -path "*/net/sctp" 2>/dev/null | head -1)
+          
+          if [ -z "$SCTP_DIR" ]; then
+              echo "⚠️ 警告: 未找到 SCTP 源码目录"
+              echo "   尝试查找所有可能的路径..."
+              find . -type d -name "sctp" 2>/dev/null
               exit 0
           fi
           
-          if [ -f "common/net/sctp/sysctl.c" ]; then
+          echo "✅ 找到 SCTP 源码目录: $SCTP_DIR"
+          
+          if [ -f "$SCTP_DIR/sysctl.c" ]; then
               echo "✅ 找到 SCTP 源码，应用 ABI 兼容性修复..."
-              sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' common/net/sctp/sysctl.c 2>/dev/null || true
+              sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' "$SCTP_DIR/sysctl.c" 2>/dev/null || true
               echo "✅ SCTP 修复完成"
           else
               echo "⚠️ SCTP 源码不完整，跳过修复"
           fi
           SCRIPT_EOF
           chmod +x lxc_fix/lxc-patches/sctp_source_fix_safe.sh
-          
+
+      - name: 执行 SCTP 修复脚本
+        run: |
+          cd ${{ env.WORKSPACE }}
           cd common
           bash ../lxc_fix/lxc-patches/sctp_source_fix_safe.sh
-          
-          echo "========================================="
-          echo ">>> 阶段 3/4：【补丁模式】提取结构体 (应用补丁后)"
-          echo "========================================="
-          
-          # 3.1 补丁模式：SCTP OFF
-          echo ">>> 3.1 正在编译 补丁组 (SCTP OFF)..."
-          sed -i '/CONFIG_IP_SCTP/d' arch/arm64/configs/gki_defconfig
-          echo "# CONFIG_IP_SCTP is not set" >> arch/arm64/configs/gki_defconfig
-          $MAKE_CMD gki_defconfig && $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
-          pahole -C net out/net/core/net_namespace.o > ../net_patched_sctp_off.txt
-          pahole -C sk_buff out/net/core/skbuff.o > ../skb_patched_sctp_off.txt
-          
-          # 3.2 补丁模式：SCTP ON
-          echo ">>> 3.2 正在编译 补丁组 (SCTP ON)..."
-          sed -i '/CONFIG_IP_SCTP/d' arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SCTP=y" >> arch/arm64/configs/gki_defconfig
-          $MAKE_CMD gki_defconfig && $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
-          pahole -C net out/net/core/net_namespace.o > ../net_patched_sctp_on.txt
-          pahole -C sk_buff out/net/core/skbuff.o > ../skb_patched_sctp_on.txt
-          
-          echo "========================================="
-          echo ">>> 阶段 4/4：生成全方位综合对比报告"
-          echo "========================================="
-          cd ${{ env.WORKSPACE }}
-          
-          diff -u net_clean_sctp_off.txt net_clean_sctp_on.txt > diff_1_clean_sctp_off_vs_on_net.txt || true
-          diff -u skb_clean_sctp_off.txt skb_clean_sctp_on.txt > diff_1_clean_sctp_off_vs_on_skb.txt || true
-          diff -u net_patched_sctp_off.txt net_patched_sctp_on.txt > diff_2_patched_sctp_off_vs_on_net.txt || true
-          diff -u skb_patched_sctp_off.txt skb_patched_sctp_on.txt > diff_2_patched_sctp_off_vs_on_skb.txt || true
-          diff -u net_clean_sctp_on.txt net_patched_sctp_on.txt > diff_3_sctp_on_clean_vs_patched_net.txt || true
-          diff -u skb_clean_sctp_on.txt skb_patched_sctp_on.txt > diff_3_sctp_on_clean_vs_patched_skb.txt || true
-          
-          zip abi_analysis_reports.zip *.txt
-          echo "✅ 2x2 正交结构体分析提取完成！"
 
-      - name: 上传排雷分析
-        if: inputs.vmlinux_debug == true
-        uses: actions/upload-artifact@v4
-        with:
-          name: abi_analysis_reports_full_matrix
-          path: ${{ env.WORKSPACE }}/abi_analysis_reports.zip
-
-      # ================== 以下为常规构建 ==================
+      # ================== 以下为常规构建流程 ==================
       - name: 配置 ccache 目录
         if: inputs.vmlinux_debug == false
         run: |
@@ -335,13 +314,12 @@ jobs:
         run: |
           gh cache delete ${{ env.CCACHE_KEY }}-${{ runner.os }}-${{ github.ref_name }} -R ${{ github.repository }} || true
 
-      - name: 添加 KernelSU/SUSFS/补丁 (常规流)
+      - name: 添加 KernelSU
         if: inputs.vmlinux_debug == false
         id: ksu_version
         run: |
           cd ${{ env.WORKSPACE }}
           
-          # KSU 安装
           if [[ "${{ github.event.inputs.ksu_type }}" == "resukisu" ]]; then
             curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/refs/heads/main/kernel/setup.sh" | bash -s main
             echo "ksuver=ReSukiSU" >> $GITHUB_OUTPUT
@@ -356,33 +334,6 @@ jobs:
             echo "ksuver=KernelSU" >> $GITHUB_OUTPUT
           fi
           
-          # 克隆补丁仓库
-          if [ ! -d "lxc_fix" ]; then
-            git clone --depth=1 https://github.com/wings110/8650-lxc-docker.git lxc_fix
-          fi
-          
-          # 应用补丁
-          for p in ./lxc_fix/lxc-patches/*.patch; do
-            echo "-> 应用补丁: $p"
-            patch -p1 -F 3 < "$p" || true
-          done
-          
-          # 创建安全修复脚本
-          cat > lxc_fix/lxc-patches/sctp_source_fix_safe.sh << 'SCRIPT_EOF'
-          #!/bin/bash
-          echo ">>> SCTP 源码安全修复..."
-          if [ -d "common/net/sctp" ] && [ -f "common/net/sctp/sysctl.c" ]; then
-              sed -i 's/struct netns_sctp \*sn = net->sctp;/struct netns_sctp *sn = \&net->sctp;/g' common/net/sctp/sysctl.c 2>/dev/null || true
-              echo "✅ SCTP 修复应用"
-          else
-              echo "⚠️ 跳过 SCTP 修复（源码不存在）"
-          fi
-          SCRIPT_EOF
-          chmod +x lxc_fix/lxc-patches/sctp_source_fix_safe.sh
-          
-          cd common
-          bash ../lxc_fix/lxc-patches/sctp_source_fix_safe.sh
-          
           # 写入 Config
           {
             echo "CONFIG_KSU=y"
@@ -391,9 +342,9 @@ jobs:
             fi
             echo "CONFIG_TMPFS_XATTR=y"
             echo "CONFIG_TMPFS_POSIX_ACL=y"
-          } >> arch/arm64/configs/gki_defconfig
+          } >> common/arch/arm64/configs/gki_defconfig
 
-      - name: 构建内核镜像 (常规流)
+      - name: 构建内核镜像
         if: inputs.vmlinux_debug == false
         run: |
           cd ${{ env.WORKSPACE }}
@@ -443,4 +394,4 @@ jobs:
         run: |
           gh release create "Build-${{ github.run_id }}" ./*.zip \
             --title "欧加真 6.1.118 SCTP-LXC 加速版" \
-            --notes "包含 LXC/Docker 补丁与完整环境支持\n- 修复 SCTP 源码缺失问题\n- 优化补丁应用流程\n- 优化磁盘空间清理"
+            --notes "包含 LXC/Docker 补丁与完整环境支持"
