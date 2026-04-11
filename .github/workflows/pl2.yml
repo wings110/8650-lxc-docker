@@ -1,4 +1,4 @@
-name: 111123sctp-new加速版构建 6.1.118 欧加真OKI内核
+name: 11223344sctp-new加速版构建 6.1.118 欧加真OKI内核
 
 env:
   TZ: Asia/Shanghai
@@ -136,7 +136,7 @@ jobs:
           echo "========== 当前磁盘空间检查 =========="
           df -h
           
-          # 使用 git clone 获取完整内核源码（确保不丢失任何目录）
+          # 使用 git clone 获取完整内核源码
           echo "正在使用 git clone 克隆内核源码..."
           git clone --depth 1 --branch oneplus/sm8650_b_16.0.0_oneplus12 \
             https://github.com/cctv18/android_kernel_common_oneplus_sm8650.git common
@@ -158,7 +158,6 @@ jobs:
           echo "========== 源码准备完成 =========="
           ls -la common/ | head -20
           
-          # ========== 关键验证：确认 SCTP 目录存在 ==========
           echo "========== 验证 SCTP 目录 =========="
           if [ -d "common/net/sctp" ]; then
             echo "✅ 验证成功：common/net/sctp 目录存在！"
@@ -196,10 +195,6 @@ jobs:
             tar -I zstd -xf "$FILE_NAME" -C ${{ env.CCACHE_DIR }}
           fi
 
-      - name: 安装 ccache
-        run: |
-          sudo apt-get update && sudo apt-get install -y ccache
-
       - name: 清除旧 ccache 缓存
         if: inputs.ccache_update
         env:
@@ -220,7 +215,7 @@ jobs:
           ccache -M "$CCACHE_MAXSIZE"
           ccache -o compression=true
 
-      # ================== 核心配置阶段：KSU / SUSFS / LZ4 等模块注入 ==================
+      # ================== 核心配置阶段 ==================
       - name: 添加KernelSU
         id: ksu_version
         run: |
@@ -449,131 +444,7 @@ jobs:
           curl -sSL https://github.com/cctv18/Baseband-guard/raw/master/setup.sh | bash
           sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
 
-      - name: 添加制作名称
-        run: |
-          cd ${{ env.WORKSPACE }}
-          echo "替换内核版本后缀..."
-          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
-            for f in ./common/scripts/setlocalversion; do
-              sed -i "\$s|echo \"\\\$res\"|echo \"-${{ github.event.inputs.kernel_suffix }}\"|" "$f"
-            done
-          else
-            for f in ./common/scripts/setlocalversion; do
-              sed -i "\$s|echo \"\\\$res\"|echo \"-${{ env.KERNEL_NAME }}\"|" "$f"
-            done
-          fi
-
-      # ================== 核心升级：云端排雷模式 (2x2 Matrix) ==================
-      - name: 【云端 ABI 排雷】纯净组与补丁组双向对比
-        if: inputs.vmlinux_debug == true
-        run: |
-          cd ${{ env.WORKSPACE }}
-          export PATH="/usr/lib/ccache:$PWD/clang20/bin:$PWD/build-tools/bin:$PATH"
-          export C_INCLUDE_PATH="/usr/include:/usr/include/x86_64-linux-gnu"
-          
-          MAKE_CMD="make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang O=out"
-          
-          echo "========================================="
-          echo ">>> 阶段 1/4：【纯净模式】提取结构体 (不打LXC补丁)"
-          echo "========================================="
-          cd common
-          
-          # 1.1 纯净模式：SCTP OFF
-          echo ">>> 1.1 正在编译 纯净组 (SCTP OFF)..."
-          sed -i '/CONFIG_IP_SCTP/d' arch/arm64/configs/gki_defconfig
-          echo "# CONFIG_IP_SCTP is not set" >> arch/arm64/configs/gki_defconfig
-          $MAKE_CMD gki_defconfig && $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
-          pahole -C net out/net/core/net_namespace.o > ../net_clean_sctp_off.txt
-          pahole -C sk_buff out/net/core/skbuff.o > ../skb_clean_sctp_off.txt
-          
-          # 1.2 纯净模式：SCTP ON
-          echo ">>> 1.2 正在编译 纯净组 (SCTP ON)..."
-          sed -i '/CONFIG_IP_SCTP/d' arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SCTP=y" >> arch/arm64/configs/gki_defconfig
-          $MAKE_CMD gki_defconfig && $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
-          pahole -C net out/net/core/net_namespace.o > ../net_clean_sctp_on.txt
-          pahole -C sk_buff out/net/core/skbuff.o > ../skb_clean_sctp_on.txt
-          
-          echo "========================================="
-          echo ">>> 阶段 2/4：【应用补丁】打入 LXC/Docker 修复"
-          echo "========================================="
-          cd ${{ env.WORKSPACE }}
-          
-          echo "========== 克隆补丁仓库 =========="
-          git clone --depth=1 https://github.com/wings110/8650-lxc-docker.git lxc_fix
-          
-          echo "正在移动补丁文件到根目录..."
-          if [ -d "lxc_fix/lxc-patches" ]; then
-            mv lxc_fix/lxc-patches/* ./ 2>/dev/null || true
-          fi
-          
-          echo "========== 应用补丁 =========="
-          for p in ./*.patch; do
-            if [ -f "$p" ]; then
-              echo "-> 应用补丁: $p"
-              sed -i 's/\r$//' "$p"
-              patch -p1 -F 3 < "$p" || true
-            fi
-          done
-          
-          echo "========== 执行 SCTP 源码修复脚本 =========="
-          SCRIPT_PATH="./sctp_source_fix.sh"
-          if [ -f "$SCRIPT_PATH" ]; then
-             echo "找到脚本，正在执行..."
-             sed -i 's/\r$//' "$SCRIPT_PATH"
-             bash "$SCRIPT_PATH"
-          else
-             echo "❌ 严重错误：未找到修复脚本 $SCRIPT_PATH"
-             ls -la
-             exit 1
-          fi
-          
-          echo "========================================="
-          echo ">>> 阶段 3/4：【补丁模式】提取结构体 (应用LXC补丁后)"
-          echo "========================================="
-          cd ${{ env.WORKSPACE }}/common
-          
-          # 3.1 补丁模式：SCTP OFF
-          echo ">>> 3.1 正在编译 补丁组 (SCTP OFF)..."
-          sed -i '/CONFIG_IP_SCTP/d' arch/arm64/configs/gki_defconfig
-          echo "# CONFIG_IP_SCTP is not set" >> arch/arm64/configs/gki_defconfig
-          $MAKE_CMD gki_defconfig && $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
-          pahole -C net out/net/core/net_namespace.o > ../net_patched_sctp_off.txt
-          pahole -C sk_buff out/net/core/skbuff.o > ../skb_patched_sctp_off.txt
-          
-          # 3.2 补丁模式：SCTP ON
-          echo ">>> 3.2 正在编译 补丁组 (SCTP ON)..."
-          sed -i '/CONFIG_IP_SCTP/d' arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP_SCTP=y" >> arch/arm64/configs/gki_defconfig
-          $MAKE_CMD gki_defconfig && $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
-          pahole -C net out/net/core/net_namespace.o > ../net_patched_sctp_on.txt
-          pahole -C sk_buff out/net/core/skbuff.o > ../skb_patched_sctp_on.txt
-          
-          echo "========================================="
-          echo ">>> 阶段 4/4：生成全方位综合对比报告"
-          echo "========================================="
-          cd ${{ env.WORKSPACE }}
-          
-          diff -u net_clean_sctp_off.txt net_clean_sctp_on.txt > diff_1_clean_sctp_off_vs_on_net.txt || true
-          diff -u skb_clean_sctp_off.txt skb_clean_sctp_on.txt > diff_1_clean_sctp_off_vs_on_skb.txt || true
-          diff -u net_patched_sctp_off.txt net_patched_sctp_on.txt > diff_2_patched_sctp_off_vs_on_net.txt || true
-          diff -u skb_patched_sctp_off.txt skb_patched_sctp_on.txt > diff_2_patched_sctp_off_vs_on_skb.txt || true
-          diff -u net_clean_sctp_on.txt net_patched_sctp_on.txt > diff_3_sctp_on_clean_vs_patched_net.txt || true
-          diff -u skb_clean_sctp_on.txt skb_patched_sctp_on.txt > diff_3_sctp_on_clean_vs_patched_skb.txt || true
-          
-          zip abi_analysis_reports.zip *.txt
-          echo "✅ 2x2 正交结构体分析提取完成！"
-
-      - name: 上传排雷分析
-        if: inputs.vmlinux_debug == true
-        uses: actions/upload-artifact@v4
-        with:
-          name: abi_analysis_reports_full_matrix
-          path: ${{ env.WORKSPACE }}/abi_analysis_reports.zip
-
-      # ================== 常规构建模式：应用LXC补丁并编译Image ==================
-      - name: 配置支持lxc-docker任务 (常规流)
-        if: inputs.vmlinux_debug == false
+      - name: 配置支持lxc-docker任务 (应用补丁与修复脚本)
         run: |
           echo "正在配置支持lxc-docker任务…"
           cd ${{ env.WORKSPACE }}
@@ -608,14 +479,71 @@ jobs:
              ls -la
              exit 1
           fi
-          echo "✅ LXC/Docker 环境配置完成！"
+          echo "✅ LXC/Docker 环境与源码重构配置完成！"
 
+      - name: 添加制作名称
+        run: |
+          cd ${{ env.WORKSPACE }}
+          echo "替换内核版本后缀..."
+          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
+            for f in ./common/scripts/setlocalversion; do
+              sed -i "\$s|echo \"\\\$res\"|echo \"-${{ github.event.inputs.kernel_suffix }}\"|" "$f"
+            done
+          else
+            for f in ./common/scripts/setlocalversion; do
+              sed -i "\$s|echo \"\\\$res\"|echo \"-${{ env.KERNEL_NAME }}\"|" "$f"
+            done
+          fi
+
+      # ================== 核心升级：云端排雷模式 (2x2 Matrix) ==================
+      - name: 【云端 ABI 排雷】双向对比与提取
+        if: inputs.vmlinux_debug == true
+        run: |
+          cd ${{ env.WORKSPACE }}
+          export PATH="/usr/lib/ccache:$PWD/clang20/bin:$PWD/build-tools/bin:$PATH"
+          export CPATH="/usr/include:/usr/include/x86_64-linux-gnu"
+          export C_INCLUDE_PATH="/usr/include:/usr/include/x86_64-linux-gnu"
+          
+          # 核心修复：强行注入宿主机头文件，解决 libelf.h 找不到的报错
+          MAKE_CMD="make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang HOSTCFLAGS=\"-I/usr/include -I/usr/include/x86_64-linux-gnu\" HOSTLDFLAGS=\"-L/usr/lib/x86_64-linux-gnu\" O=out"
+          
+          echo "========================================="
+          echo ">>> 阶段：【纯净模式】提取结构体 (SCTP OFF/ON)"
+          echo "========================================="
+          cd common
+          
+          # 1. 纯净模式：SCTP OFF
+          sed -i '/CONFIG_IP_SCTP/d' arch/arm64/configs/gki_defconfig
+          echo "# CONFIG_IP_SCTP is not set" >> arch/arm64/configs/gki_defconfig
+          eval $MAKE_CMD gki_defconfig && eval $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
+          pahole -C net out/net/core/net_namespace.o > ../net_clean_sctp_off.txt
+          pahole -C sk_buff out/net/core/skbuff.o > ../skb_clean_sctp_off.txt
+          
+          # 2. 纯净模式：SCTP ON
+          sed -i '/CONFIG_IP_SCTP/d' arch/arm64/configs/gki_defconfig
+          echo "CONFIG_IP_SCTP=y" >> arch/arm64/configs/gki_defconfig
+          eval $MAKE_CMD gki_defconfig && eval $MAKE_CMD net/core/net_namespace.o net/core/skbuff.o
+          pahole -C net out/net/core/net_namespace.o > ../net_clean_sctp_on.txt
+          pahole -C sk_buff out/net/core/skbuff.o > ../skb_clean_sctp_on.txt
+          
+          echo "✅ 云端 ABI 提取完毕（排雷流程已结束，由于脚本顺序已变更为前置应用补丁，此模式主要作基准对比参考）"
+
+      - name: 上传排雷分析
+        if: inputs.vmlinux_debug == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: abi_analysis_reports_full_matrix
+          path: ${{ env.WORKSPACE }}/*.txt
+
+      # ================== 常规构建模式：编译 Image ==================
       - name: 构建内核镜像 (常规流)
         if: inputs.vmlinux_debug == false
         run: |
           cd ${{ env.WORKSPACE }}
           export PATH="/usr/lib/ccache:$PWD/clang20/bin:$PWD/build-tools/bin:$PATH"
           export C_INCLUDE_PATH="/usr/include:/usr/include/x86_64-linux-gnu"
+          export CPATH="/usr/include:/usr/include/x86_64-linux-gnu"
+          
           export CCACHE_COMPILERCHECK="none"
           export CCACHE_BASEDIR="${{ github.workspace }}"
           export CCACHE_NOHASHDIR="true"
@@ -625,10 +553,18 @@ jobs:
           echo "sloppiness = file_stat_matches,include_file_ctime,include_file_mtime,pch_defines,file_macro,time_macros" >> "$CCACHE_DIR/ccache.conf"
           
           cd common
+          # 核心修复：强行注入宿主机头文件，解决 tools/bpf 下 resolve_btfids 缺少 libelf.h 的报错！
           make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            CC="ccache clang" O=out gki_defconfig
+            CC="ccache clang" \
+            HOSTCFLAGS="-I/usr/include -I/usr/include/x86_64-linux-gnu" \
+            HOSTLDFLAGS="-L/usr/lib/x86_64-linux-gnu" \
+            O=out gki_defconfig
+            
           make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            CC="ccache clang" O=out Image
+            CC="ccache clang" \
+            HOSTCFLAGS="-I/usr/include -I/usr/include/x86_64-linux-gnu" \
+            HOSTLDFLAGS="-L/usr/lib/x86_64-linux-gnu" \
+            O=out Image
 
       - name: 保存新的 ccache 缓存
         if: inputs.ccache_update || steps.ccache-restore.outputs.cache-hit != 'true'
@@ -819,6 +755,7 @@ jobs:
           ### ⏫️ 更新内容：
           - 更新${{ env.KSU_TYPENAME }}至最新版本（${{ needs.build.outputs.ksuver }}）
           - 修复并完美加入了完整的 LXC/Docker SCTP 高级网络支持
+          - 修复 `libelf.h` 缺失及 Android Clang 工具鏈隔離問題
           EOF
 
           ZIP_FILE=$(find ./release_zips -name "AnyKernel3_*.zip" | head -1)
