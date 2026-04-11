@@ -251,7 +251,7 @@ jobs:
           SCRIPT_EOF
           chmod +x lxc_fix/lxc-patches/sctp_source_fix_safe.sh
           
-          cd common
+          # cd common
           bash ../lxc_fix/lxc-patches/sctp_source_fix_safe.sh
           
           echo "========================================="
@@ -366,7 +366,7 @@ jobs:
           SCRIPT_EOF
           chmod +x lxc_fix/lxc-patches/sctp_source_fix_safe.sh
           
-          cd common
+          # cd common
           bash ../lxc_fix/lxc-patches/sctp_source_fix_safe.sh
           
           # 写入 Config
