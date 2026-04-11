@@ -107,17 +107,46 @@ jobs:
       actions: write
       contents: read
     steps:
-      - name: 释放磁盘空间（激进模式）
-        uses: easimon/maximize-build-space@master
-        with:
-          root-reserve-mb: 2048
-          swap-size-mb: 2048
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-docker-images: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-          remove-large-packages: 'true'
+      - name: 额外激进清理磁盘
+        run: |
+          echo "========== 开始激进清理 =========="
+          
+          sudo apt-mark hold firefox || true
+          sudo apt-mark hold libc-bin || true
+          sudo apt purge -y man-db || true
+          sudo rm -rf /var/lib/man-db/auto-update
+          
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/lib/jvm
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /opt/microsoft
+          sudo rm -rf /usr/local/graalvm
+          sudo rm -rf /opt/az
+          sudo rm -rf /usr/share/az_
+          
+          sudo apt clean
+          sudo apt autoclean
+          sudo apt autoremove --purge -y
+          sudo rm -rf /var/lib/apt/lists/*
+          sudo rm -rf /var/cache/apt/archives/*.deb
+          
+          sudo journalctl --vacuum-size=10M
+          sudo rm -rf /tmp/* /var/tmp/*
+          rm -rf ~/.cache/* ~/.npm ~/.cargo ~/.rustup ~/.local/share/pip
+          
+          sudo rm -rf /var/lib/docker || true
+          sudo rm -rf /var/lib/containerd || true
+          
+          sudo find / -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+          
+          echo "========== 清理完成 =========="
+          df -h
+          FREE_GB=$(df / | awk 'NR==2 {print int($4/1024/1024)}')
+          echo "可用空间: ${FREE_GB}GB"
 
       - name: 安装环境依赖+初始化源码（使用 git clone）
         run: |
@@ -184,7 +213,7 @@ jobs:
           echo "========================================="
           echo ">>> 阶段 1/4：【纯净模式】提取结构体 (不打任何补丁)"
           echo "========================================="
-          cd common
+          # cd common
           
           # 1.1 纯净模式：SCTP OFF
           echo ">>> 1.1 正在编译 纯净组 (SCTP OFF)..."
@@ -424,4 +453,4 @@ jobs:
         run: |
           gh release create "Build-${{ github.run_id }}" ./*.zip \
             --title "欧加真 6.1.118 SCTP-LXC 加速版" \
-            --notes "包含 LXC/Docker 补丁与完整环境支持\n- 修复 SCTP 源码缺失问题（改用 git clone）\n- 优化补丁应用流程\n- 优化磁盘空间清理"
+            --notes "包含 LXC/Docker 补丁与完整环境支持\n- 修复 SCTP 源码缺失问题（改用 git clone）\n- 优化补丁应用流程\n- 手动激进清理磁盘空间"
